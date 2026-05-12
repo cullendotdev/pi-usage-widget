@@ -9,7 +9,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
-import { CancellableLoader, Container, Spacer, matchesKey, visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { CancellableLoader, Container, Spacer, matchesKey, visibleWidth, truncateToWidth, wrapTextWithAnsi, type TUI } from "@earendil-works/pi-tui";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -81,14 +81,22 @@ interface TimeFilteredStats {
 }
 
 interface UsageData {
+	lastHour: TimeFilteredStats;
 	today: TimeFilteredStats;
+	yesterday: TimeFilteredStats;
 	thisWeek: TimeFilteredStats;
 	lastWeek: TimeFilteredStats;
+	thisMonth: TimeFilteredStats;
 	allTime: TimeFilteredStats;
 }
 
 type TabName = "today" | "thisWeek" | "lastWeek" | "allTime";
 type ViewMode = "table" | "insights";
+
+type TimeScope = "lastHour" | "today" | "yesterday" | "thisWeek" | "lastWeek" | "thisMonth" | "allTime";
+
+// Display modes for the footer widget
+type DisplayMode = "summary" | "compact" | "detailed-collapsed" | "detailed-expanded" | "hidden";
 
 // =============================================================================
 // Column Configuration
@@ -337,35 +345,39 @@ function emptyPeriodRawData(): PeriodRawData {
 
 function emptyUsageData(): UsageData {
 	return {
+		lastHour: emptyTimeFilteredStats(),
 		today: emptyTimeFilteredStats(),
+		yesterday: emptyTimeFilteredStats(),
 		thisWeek: emptyTimeFilteredStats(),
 		lastWeek: emptyTimeFilteredStats(),
+		thisMonth: emptyTimeFilteredStats(),
 		allTime: emptyTimeFilteredStats(),
 	};
-}
-
-function getPeriodsForTimestamp(timestamp: number, todayMs: number, weekStartMs: number, lastWeekStartMs: number): TabName[] {
-	const periods: TabName[] = ["allTime"];
-	if (timestamp >= todayMs) periods.push("today");
-	if (timestamp >= weekStartMs) {
-		periods.push("thisWeek");
-	} else if (timestamp >= lastWeekStartMs) {
-		periods.push("lastWeek");
-	}
-	return periods;
 }
 
 function addMessagesToUsageData(
 	data: UsageData,
 	sessionId: string,
 	messages: SessionMessage[],
+	nowMs: number,
 	todayMs: number,
+	yesterdayMs: number,
 	weekStartMs: number,
 	lastWeekStartMs: number,
-	rawByPeriod: Record<TabName, PeriodRawData>,
+	monthStartMs: number,
+	lastHourMs: number,
+	rawByPeriod: Record<string, PeriodRawData>,
 	globalSessionSpans: Map<string, GlobalSessionSpan>
 ): void {
-	const sessionContributed = { today: false, thisWeek: false, lastWeek: false, allTime: false };
+	const sessionContributed: Record<string, boolean> = {
+		lastHour: false,
+		today: false,
+		yesterday: false,
+		thisWeek: false,
+		lastWeek: false,
+		thisMonth: false,
+		allTime: false,
+	};
 
 	for (const msg of messages) {
 		// Track real per-session lifetime across every message we see, regardless of
@@ -380,7 +392,6 @@ function addMessagesToUsageData(
 			}
 		}
 
-		const periods = getPeriodsForTimestamp(msg.timestamp, todayMs, weekStartMs, lastWeekStartMs);
 		const tokens = {
 			// Count fresh tokens processed this turn.
 			// Include cacheWrite because those prompt tokens were newly written and billed.
@@ -392,8 +403,18 @@ function addMessagesToUsageData(
 			cacheWrite: msg.cacheWrite,
 		};
 
-		for (const period of periods) {
-			const stats = data[period];
+		// Determine which scopes this message belongs to
+		const scopes: string[] = [];
+		if (msg.timestamp >= lastHourMs) scopes.push("lastHour");
+		if (msg.timestamp >= todayMs) scopes.push("today");
+		if (msg.timestamp >= yesterdayMs && msg.timestamp < todayMs) scopes.push("yesterday");
+		if (msg.timestamp >= weekStartMs) scopes.push("thisWeek");
+		if (msg.timestamp >= lastWeekStartMs && msg.timestamp < weekStartMs) scopes.push("lastWeek");
+		if (msg.timestamp >= monthStartMs) scopes.push("thisMonth");
+		scopes.push("allTime");
+
+		for (const scope of scopes) {
+			const stats = data[scope as keyof UsageData] as TimeFilteredStats;
 
 			let providerStats = stats.providers.get(msg.provider);
 			if (!providerStats) {
@@ -414,10 +435,11 @@ function addMessagesToUsageData(
 			accumulateStats(providerStats, msg.cost, tokens);
 
 			accumulateStats(stats.totals, msg.cost, tokens);
-			sessionContributed[period] = true;
+			sessionContributed[scope] = true;
 
-			const raw = rawByPeriod[period];
-			raw.messages.push({
+			const raw = rawByPeriod[scope];
+			if (raw) {
+				raw.messages.push({
 				sessionId,
 				timestamp: msg.timestamp,
 				cost: msg.cost,
@@ -425,20 +447,31 @@ function addMessagesToUsageData(
 				cacheRead: msg.cacheRead,
 				cacheWrite: msg.cacheWrite,
 			});
-			raw.sessionCosts.set(sessionId, (raw.sessionCosts.get(sessionId) ?? 0) + msg.cost);
+				raw.sessionCosts.set(sessionId, (raw.sessionCosts.get(sessionId) ?? 0) + msg.cost);
+			}
 		}
 	}
 
+	if (sessionContributed.lastHour) data.lastHour.totals.sessions++;
 	if (sessionContributed.today) data.today.totals.sessions++;
+	if (sessionContributed.yesterday) data.yesterday.totals.sessions++;
 	if (sessionContributed.thisWeek) data.thisWeek.totals.sessions++;
 	if (sessionContributed.lastWeek) data.lastWeek.totals.sessions++;
+	if (sessionContributed.thisMonth) data.thisMonth.totals.sessions++;
 	if (sessionContributed.allTime) data.allTime.totals.sessions++;
 }
 
 async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null> {
+	const nowMs = Date.now();
+
+	// Boundary timestamps for all scopes
 	const startOfToday = new Date();
 	startOfToday.setHours(0, 0, 0, 0);
 	const todayMs = startOfToday.getTime();
+
+	const startOfYesterday = new Date(startOfToday);
+	startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+	const yesterdayMs = startOfYesterday.getTime();
 
 	// Start of current week (Monday 00:00)
 	const startOfWeek = new Date();
@@ -453,11 +486,23 @@ async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null>
 	startOfLastWeek.setDate(startOfLastWeek.getDate() - 7);
 	const lastWeekStartMs = startOfLastWeek.getTime();
 
+	// Start of this month (1st at 00:00)
+	const startOfMonth = new Date();
+	startOfMonth.setDate(1);
+	startOfMonth.setHours(0, 0, 0, 0);
+	const monthStartMs = startOfMonth.getTime();
+
+	// Last hour
+	const lastHourMs = nowMs - 60 * 60 * 1000;
+
 	const data = emptyUsageData();
-	const rawByPeriod: Record<TabName, PeriodRawData> = {
+	const rawByPeriod: Record<string, PeriodRawData> = {
+		lastHour: emptyPeriodRawData(),
 		today: emptyPeriodRawData(),
+		yesterday: emptyPeriodRawData(),
 		thisWeek: emptyPeriodRawData(),
 		lastWeek: emptyPeriodRawData(),
+		thisMonth: emptyPeriodRawData(),
 		allTime: emptyPeriodRawData(),
 	};
 	const globalSessionSpans = new Map<string, GlobalSessionSpan>();
@@ -476,9 +521,13 @@ async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null>
 			data,
 			parsed.sessionId,
 			parsed.messages,
+			nowMs,
 			todayMs,
+			yesterdayMs,
 			weekStartMs,
 			lastWeekStartMs,
+			monthStartMs,
+			lastHourMs,
 			rawByPeriod,
 			globalSessionSpans
 		);
@@ -492,8 +541,11 @@ async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null>
 		if (span.endMs - span.startMs >= LONG_SESSION_MS) longSessionIds.add(id);
 	}
 
-	for (const period of TAB_ORDER) {
-		data[period].insights = computeInsights(rawByPeriod[period], longSessionIds);
+	for (const period of SCOPE_ORDER) {
+		const raw = rawByPeriod[period];
+		if (raw) {
+			(data[period as keyof UsageData] as TimeFilteredStats).insights = computeInsights(raw, longSessionIds);
+		}
 	}
 
 	return data;
@@ -685,6 +737,30 @@ function formatNumber(n: number): string {
 	return n.toLocaleString();
 }
 
+function formatCostFixed3(cost: number): string {
+	if (cost === 0) return "-";
+	return `$${cost.toFixed(3)}`;
+}
+
+function formatScopeLabel(scope: TimeScope): string {
+	switch (scope) {
+		case "lastHour":
+			return "Last Hour";
+		case "today":
+			return "Today";
+		case "yesterday":
+			return "Yesterday";
+		case "thisWeek":
+			return "This Week";
+		case "lastWeek":
+			return "Last Week";
+		case "thisMonth":
+			return "This Month";
+		case "allTime":
+			return "All Time";
+	}
+}
+
 function padLeft(s: string, len: number): string {
 	const vis = visibleWidth(s);
 	if (vis >= len) return s;
@@ -745,18 +821,89 @@ function getTableLayout(width: number): TableLayout {
 	};
 }
 
+// Widget-specific cost column (3 decimal places)
+const WIDGET_COST_COLUMN: DataColumn = {
+	label: "Cost",
+	width: 9,
+	getValue: (s) => formatCostFixed3(s.cost),
+};
+
+const WIDGET_FULL_DATA_COLUMNS: DataColumn[] = [
+	SESSIONS_COLUMN,
+	MSGS_COLUMN,
+	WIDGET_COST_COLUMN,
+	TOKENS_COLUMN,
+	INPUT_COLUMN,
+	OUTPUT_COLUMN,
+	CACHE_COLUMN,
+];
+
+const WIDGET_TABLE_LAYOUTS: TableLayoutCandidate[] = [
+	{ columns: WIDGET_FULL_DATA_COLUMNS, minNameWidth: MAX_NAME_COL_WIDTH },
+	{ columns: [SESSIONS_COLUMN, MSGS_COLUMN, WIDGET_COST_COLUMN, TOKENS_COLUMN], minNameWidth: 14, compact: true },
+	{ columns: [SESSIONS_COLUMN, WIDGET_COST_COLUMN, TOKENS_COLUMN], minNameWidth: 12, compact: true },
+	{ columns: [WIDGET_COST_COLUMN, TOKENS_COLUMN], minNameWidth: 10, compact: true },
+	{ columns: [WIDGET_COST_COLUMN], minNameWidth: 8, compact: true },
+];
+
+function getWidgetTableLayout(width: number): TableLayout {
+	const safeWidth = Math.max(width, 0);
+
+	for (const candidate of WIDGET_TABLE_LAYOUTS) {
+		const columnsWidth = sumColumnWidths(candidate.columns);
+		const nameWidth = Math.min(MAX_NAME_COL_WIDTH, Math.max(safeWidth - columnsWidth, 0));
+		if (nameWidth >= candidate.minNameWidth) {
+			return {
+				columns: candidate.columns,
+				nameWidth,
+				tableWidth: nameWidth + columnsWidth,
+				compact: candidate.compact ?? false,
+			};
+		}
+	}
+
+	const fallback = WIDGET_TABLE_LAYOUTS[WIDGET_TABLE_LAYOUTS.length - 1]!;
+	const fallbackColumnsWidth = sumColumnWidths(fallback.columns);
+	const fallbackNameWidth = Math.min(MAX_NAME_COL_WIDTH, Math.max(safeWidth - fallbackColumnsWidth, 0));
+	return {
+		columns: fallback.columns,
+		nameWidth: fallbackNameWidth,
+		tableWidth: fallbackNameWidth + fallbackColumnsWidth,
+		compact: fallback.compact ?? false,
+	};
+}
+
 // =============================================================================
 // Component
 // =============================================================================
 
-const TAB_LABELS: Record<TabName, string> = {
+const TAB_LABELS: Record<TimeScope, string> = {
+	lastHour: "Last Hour",
 	today: "Today",
+	yesterday: "Yesterday",
 	thisWeek: "This Week",
 	lastWeek: "Last Week",
+	thisMonth: "This Month",
 	allTime: "All Time",
 };
 
-const TAB_ORDER: TabName[] = ["today", "thisWeek", "lastWeek", "allTime"];
+const DISPLAY_MODE_ORDER: DisplayMode[] = [
+	"summary",
+	"compact",
+	"detailed-collapsed",
+	"detailed-expanded",
+	"hidden",
+];
+
+const SCOPE_ORDER: TimeScope[] = [
+	"lastHour",
+	"today",
+	"yesterday",
+	"thisWeek",
+	"lastWeek",
+	"thisMonth",
+	"allTime",
+];
 
 class UsageComponent {
 	private activeTab: TabName = "allTime";
@@ -1062,10 +1209,225 @@ class UsageComponent {
 }
 
 // =============================================================================
+// Footer Widget
+// =============================================================================
+
+class UsageWidget {
+	private displayMode: DisplayMode = "summary";
+	private scope: TimeScope = "today";
+	private usageData: UsageData | null = null;
+	private theme: Theme;
+	private tui: TUI | null = null;
+
+	constructor(theme: Theme) {
+		this.theme = theme;
+	}
+
+	setTui(tui: TUI): void {
+		this.tui = tui;
+	}
+
+	setData(data: UsageData | null): void {
+		this.usageData = data;
+		this.tui?.requestRender();
+	}
+
+	setMode(mode: DisplayMode): void {
+		this.displayMode = mode;
+		this.tui?.requestRender();
+	}
+
+	setScope(scope: TimeScope): void {
+		this.scope = scope;
+		this.tui?.requestRender();
+	}
+
+	invalidate(): void {
+		this.tui?.requestRender();
+	}
+
+	dispose(): void {}
+
+	// Cycle display mode forward (wraps)
+	cycleMode(): void {
+		const idx = DISPLAY_MODE_ORDER.indexOf(this.displayMode);
+		const next = DISPLAY_MODE_ORDER[(idx + 1) % DISPLAY_MODE_ORDER.length];
+		this.setMode(next);
+	}
+
+	// Cycle scope forward (wraps)
+	cycleScope(): void {
+		const idx = SCOPE_ORDER.indexOf(this.scope);
+		const next = SCOPE_ORDER[(idx + 1) % SCOPE_ORDER.length];
+		this.setScope(next);
+	}
+
+	// Main render function returns lines to display in the widget area
+	render(width: number): string[] {
+		const th = this.theme;
+
+		// Hidden mode
+		if (this.displayMode === "hidden") {
+			return [];
+		}
+
+		// If no data yet, show loading/empty placeholder
+		if (!this.usageData) {
+			return [th.fg("dim", "Usage: Loading...")];
+		}
+
+		const dataForScope = this.usageData[this.scope] as TimeFilteredStats;
+
+		// Summary mode
+		if (this.displayMode === "summary") {
+			if (dataForScope.totals.messages === 0) {
+				const label = formatScopeLabel(this.scope);
+				return [th.fg("dim", `Usage: --- (${label})`)];
+			}
+			const costStr = formatCostFixed3(dataForScope.totals.cost);
+			const label = formatScopeLabel(this.scope);
+			return [
+				th.fg("muted", "Usage: ") + th.fg("accent", costStr) + th.fg("muted", ` (${label})`),
+			];
+		}
+
+		// Compact mode
+		if (this.displayMode === "compact") {
+			if (dataForScope.totals.messages === 0) {
+				return [th.fg("dim", `Usage (${formatScopeLabel(this.scope)}): no data`)];
+			}
+			const lines: string[] = [];
+			lines.push(th.fg("accent", `Usage (${formatScopeLabel(this.scope)}):`));
+			// Sort providers by cost descending
+			const providers = Array.from(dataForScope.providers.entries())
+				.sort((a, b) => b[1].cost - a[0].cost);
+			for (const [provider, stats] of providers) {
+				const costStr = formatCostFixed3(stats.cost);
+				lines.push(th.fg("muted", "  ") + provider + th.fg("accent", ": ") + th.fg("accent", costStr));
+			}
+			return lines;
+		}
+
+		// Detailed modes (collapsed or expanded) use table rendering
+		const layout = getWidgetTableLayout(width);
+		const lines: string[] = [];
+
+		// Title line with scope
+		lines.push(th.fg("accent", `Usage (${formatScopeLabel(this.scope)})`));
+		lines.push("");
+
+		// Header
+		lines.push(...this.renderTableHeader(width, layout));
+
+		// Rows
+		const providerOrder = Array.from(dataForScope.providers.entries())
+			.sort((a, b) => b[1].cost - a[0].cost)
+			.map(([name]) => name);
+
+		if (providerOrder.length === 0) {
+			lines.push(th.fg("dim", "  No usage data for this period"));
+		} else {
+			for (let i = 0; i < providerOrder.length; i++) {
+				const providerName = providerOrder[i]!;
+				const providerStats = dataForScope.providers.get(providerName)!;
+				const isExpanded = this.displayMode === "detailed-expanded";
+				const arrow = isExpanded ? "▾" : "▸";
+				const prefix = i === 0 ? th.fg("accent", `${arrow} `) : th.fg("dim", `${arrow} `);
+				lines.push(
+					this.renderDataRow(providerName, providerStats, layout, {
+						prefix,
+					})
+				);
+
+				if (isExpanded) {
+					const models = Array.from(providerStats.models.entries())
+						.sort((a, b) => b[1].cost - a[0].cost);
+					for (const [modelName, modelStats] of models) {
+						lines.push(
+							this.renderDataRow(modelName, modelStats, layout, {
+							indent: 4,
+							dimAll: true,
+						})
+					);
+					}
+				}
+			}
+		}
+
+		// Totals
+		lines.push(...this.renderTotals(layout));
+
+		// Formula note
+		lines.push(...this.renderFormulaNote(width));
+
+		return lines;
+	}
+
+	private renderTableHeader(width: number, layout: TableLayout): string[] {
+		const th = this.theme;
+		let headerLine = fitCell("Provider / Model", layout.nameWidth);
+		for (const col of layout.columns) {
+			const label = fitCell(col.label, col.width, "right");
+			headerLine += col.dimmed ? th.fg("dim", label) : label;
+		}
+		return [th.fg("muted", headerLine), th.fg("border", "─".repeat(layout.tableWidth))];
+	}
+
+	private renderDataRow(
+		name: string,
+		stats: BaseStats & { sessions: Set<string> | number },
+		layout: TableLayout,
+		options: { indent?: number; dimAll?: boolean; prefix?: string } = {}
+	): string {
+		const th = this.theme;
+		const { indent = 0, dimAll = false, prefix } = options;
+
+		const rawPrefix = prefix ?? " ".repeat(indent);
+		const safePrefix = layout.nameWidth > 0 ? truncateToWidth(rawPrefix, layout.nameWidth, "") : "";
+		const prefixWidth = safePrefix.length;
+		const innerNameWidth = Math.max(layout.nameWidth - prefixWidth, 0);
+		const truncName = innerNameWidth > 0 ? truncateToWidth(name, innerNameWidth) : "";
+		const styledName = dimAll ? th.fg("dim", truncName) : truncName;
+
+		let row = safePrefix + (innerNameWidth > 0 ? padRight(styledName, innerNameWidth) : "");
+
+		for (const col of layout.columns) {
+			const value = fitCell(col.getValue(stats), col.width, "right");
+			const shouldDim = col.dimmed || dimAll;
+			row += shouldDim ? th.fg("dim", value) : value;
+		}
+
+		return row;
+	}
+
+	private renderTotals(layout: TableLayout): string[] {
+		const th = this.theme;
+		const stats = this.usageData![this.scope] as TimeFilteredStats;
+		let totalRow = fitCell(th.bold("Total"), layout.nameWidth);
+		for (const col of layout.columns) {
+			const value = fitCell(col.getValue(stats.totals), col.width, "right");
+			totalRow += col.dimmed ? th.fg("dim", value) : value;
+		}
+		return [th.fg("border", "─".repeat(layout.tableWidth)), totalRow, ""];
+	}
+
+	private renderFormulaNote(width: number): string[] {
+		const line = pickFittingText(width, [
+			"Tokens = Input + Output + CacheWrite  ·  ↑In = Input + CacheWrite  (as of 0.2.0)",
+			"Tokens = In + Out + CacheWrite  ·  ↑In = In + CacheWrite  (v0.2.0+)",
+			"Tokens & ↑In include CacheWrite (v0.2.0+)",
+			"Incl. CacheWrite (v0.2.0+)",
+		]);
+		return [this.theme.fg("dim", line), ""];
+	}
+}
+
+// =============================================================================
 // Extension Entry Point
 // =============================================================================
 
 export default function (pi: ExtensionAPI) {
+	// Keep the existing /usage modal command
 	pi.registerCommand("usage", {
 		description: "Show usage statistics dashboard",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
@@ -1123,6 +1485,164 @@ export default function (pi: ExtensionAPI) {
 					dispose: () => {},
 				};
 			});
+		},
+	});
+
+	// =========================================================================
+	// Footer Widget Setup
+	// =========================================================================
+
+	let currentWidget: UsageWidget | null = null;
+	let debounceTimer: NodeJS.Timeout | null = null;
+	let periodicTimer: NodeJS.Timeout | null = null;
+	let currentAbortController: AbortController | null = null;
+	let unsubMessageEnd: (() => void) | null = null;
+
+	function cancelPendingUpdate(): void {
+		if (currentAbortController) {
+			currentAbortController.abort();
+			currentAbortController = null;
+		}
+	}
+
+	async function updateWidgetData(widget: UsageWidget, signal: AbortSignal): Promise<void> {
+		const data = await collectUsageData(signal);
+		if (!signal.aborted) {
+			widget.setData(data);
+		}
+	}
+
+	function scheduleDebouncedRefresh(widget: UsageWidget): void {
+		if (debounceTimer) {
+			clearTimeout(debounceTimer);
+			debounceTimer = null;
+		}
+		cancelPendingUpdate();
+		debounceTimer = setTimeout(() => {
+			debounceTimer = null;
+			if (currentWidget) {
+				const controller = new AbortController();
+				currentAbortController = controller;
+				updateWidgetData(currentWidget, controller.signal).catch(() => {});
+			}
+		}, 1000);
+	}
+
+	function startPeriodicRefresh(widget: UsageWidget): void {
+		if (periodicTimer) {
+			clearInterval(periodicTimer);
+		}
+		periodicTimer = setInterval(() => {
+			if (currentWidget) {
+				cancelPendingUpdate();
+				const controller = new AbortController();
+				currentAbortController = controller;
+				updateWidgetData(currentWidget, controller.signal).catch(() => {});
+			}
+		}, 30_000);
+	}
+
+	function stopPeriodicRefresh(): void {
+		if (periodicTimer) {
+			clearInterval(periodicTimer);
+			periodicTimer = null;
+		}
+	}
+
+	pi.on("session_start", async (_event, ctx) => {
+		if (!ctx.hasUI) return;
+
+		// Clean up any previous session state (should be clean but be safe)
+		cancelPendingUpdate();
+		stopPeriodicRefresh();
+		if (currentWidget) {
+			currentWidget.dispose();
+			currentWidget = null;
+		}
+
+		// Create a fresh widget for this session
+		const widget = new UsageWidget(ctx.ui.theme);
+		currentWidget = widget;
+
+		// Initial data load
+		const controller = new AbortController();
+		currentAbortController = controller;
+		await updateWidgetData(widget, controller.signal).catch(() => {});
+		currentAbortController = null;
+
+		// Register the widget with Pi UI using factory form to access tui.requestRender()
+		ctx.ui.setWidget("usage-stats-widget", (tui, _theme) => {
+			widget.setTui(tui);
+			return {
+				render: (w: number) => widget.render(w),
+				invalidate: () => widget.invalidate(),
+			};
+		}, { placement: "aboveEditor" });
+
+		// Start periodic refresh
+		startPeriodicRefresh(widget);
+
+		// Subscribe to message_end for real-time updates
+		unsubMessageEnd = pi.on("message_end", () => {
+			scheduleDebouncedRefresh(widget);
+		});
+	});
+
+	pi.on("session_switch", async (_event, ctx) => {
+		if (!ctx.hasUI) return;
+		// Clean up previous session resources
+		if (unsubMessageEnd) {
+			unsubMessageEnd();
+			unsubMessageEnd = null;
+		}
+		cancelPendingUpdate();
+		stopPeriodicRefresh();
+		if (debounceTimer) {
+			clearTimeout(debounceTimer);
+			debounceTimer = null;
+		}
+		if (currentWidget) {
+			currentWidget.dispose();
+			currentWidget = null;
+		}
+		// New session will trigger session_start; nothing else needed
+	});
+
+	pi.on("session_end", () => {
+		if (unsubMessageEnd) {
+			unsubMessageEnd();
+			unsubMessageEnd = null;
+		}
+		cancelPendingUpdate();
+		stopPeriodicRefresh();
+		if (debounceTimer) {
+			clearTimeout(debounceTimer);
+			debounceTimer = null;
+		}
+		if (currentWidget) {
+			currentWidget.dispose();
+			currentWidget = null;
+		}
+	});
+
+	// Register keyboard shortcuts
+	pi.registerCommand("cycle-usage-mode", {
+		description: "Cycle usage widget display mode",
+		shortcuts: ["ctrl+u"],
+		handler: async () => {
+			if (currentWidget) {
+				currentWidget.cycleMode();
+			}
+		},
+	});
+
+	pi.registerCommand("cycle-usage-scope", {
+		description: "Cycle usage widget time scope",
+		shortcuts: ["ctrl+shift+u"],
+		handler: async () => {
+			if (currentWidget) {
+				currentWidget.cycleScope();
+			}
 		},
 	});
 }

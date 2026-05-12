@@ -76,7 +76,7 @@ The insights currently shown:
 | Long-running sessions | session lifetime ≥ 8 hours (global, not per-period slice) |
 | Top-session concentration | top 5 sessions by cost |
 
-### Time Periods
+### Time Periods (modal)
 
 | Period | Definition |
 |--------|------------|
@@ -86,6 +86,88 @@ The insights currently shown:
 | **All Time** | All recorded sessions |
 
 Use `Tab` or `←`/`→` to switch between periods.
+
+### Usage Widget (Footer)
+
+A live usage widget appears **above the editor** whenever Pi is running. It provides at-a-glance cost tracking without interrupting your workflow.
+
+#### Modes
+
+Press `Ctrl+U` to cycle through five display modes:
+
+1. **Summary** — single-line total cost for the current scope
+
+   ```
+   Usage: $0.123 (Today)
+   ```
+
+2. **Compact** — per-provider breakdown
+
+   ```
+   Usage (Today):
+     Deepseek: $0.123
+     Google: $1.200
+   ```
+
+3. **Detailed (Collapsed)** — full table with providers only
+
+   ```
+   Usage (Today)              Sessions     Msgs     Cost   Tokens     ↑In    ↓Out   Cache
+   ──────────────────────────────────────────────────────────────────────────────────────
+   ▸ google                          5       25  $10.254   888.1k  800.1k     88k     19k
+   ▸ deepseek                        1        5  $0.0014     8.3k    7.3k     999     19k
+   ──────────────────────────────────────────────────────────────────────────────────────
+   ```
+
+4. **Detailed (Expanded)** — full table with models nested under each provider
+
+   ```
+   Usage (Today)              Sessions     Msgs     Cost   Tokens     ↑In    ↓Out   Cache
+   ──────────────────────────────────────────────────────────────────────────────────────
+   ▾ deepseek                       38      839    $1.16     2.2M      2M    157k     19k
+       deepseek-v4-pro              25      718    $1.11     1.9M    1.8M    145k     12k
+       deepseek-v4-flash            13      121    $0.06     298k    265k     12k      7k
+   ▾ google                          8       37    $0.32     449k    349k    100k     19k
+       gemini-3.1-pro-preview        3        7    $0.21      85k     75k     10k      4k
+       gemini-3.1-flash-li...        4       28    $0.10     347k    262k     85k     14k
+       gemini-flash-latest           1        1  $0.0089      31k     26k      5k      0k
+   ──────────────────────────────────────────────────────────────────────────────────────
+   ```
+
+5. **Hidden** — widget is not shown
+
+#### Scopes
+
+Press `Ctrl+Shift+U` to cycle time scopes:
+
+- Last Hour
+- Today
+- Yesterday
+- This Week
+- Last Week
+- This Month
+- All Time
+
+#### Formatting
+
+- **Cost**: always 3 decimal places (e.g. `$0.123`, `$1.200`). Zero shows as `-`.
+- **Tokens**: follows Pi conventions:
+  - 0–999: raw number
+  - 1k–9.9k: `X.Xk`
+  - 10k–999k: `Xk`
+  - 1M–9.9M: `X.XM`
+  - 10M+: `XM`
+
+#### Real-time Updates
+
+The widget updates automatically:
+
+- Within ~1 second after each assistant message completes
+- Every 30 seconds to capture background subagent activity
+
+#### Defaults
+
+On startup, the widget defaults to **Summary** mode and **Today** scope.
 
 ### Timezone
 
