@@ -876,23 +876,47 @@ export function renderWidget(
   const columnConfig = config.modes[resolvedMode] ?? config.modes["compact"]!;
 
   // Route to mode renderer
+  let lines: string[];
   switch (resolvedMode) {
     case "summary":
-      return clampLines(renderSummary(theme, columnConfig, scopeStats, activeScope, safeWidth), safeWidth);
+      lines = renderSummary(theme, columnConfig, scopeStats, activeScope, safeWidth);
+      break;
 
     case "compact":
-      return clampLines(renderCompact(theme, columnConfig, scopeStats, activeScope, safeWidth, config), safeWidth);
+      lines = renderCompact(theme, columnConfig, scopeStats, activeScope, safeWidth, config);
+      break;
 
     case "per-model":
-      return clampLines(
-        renderPerModel(theme, columnConfig, scopeStats, activeScope, safeWidth, config),
-        safeWidth,
-      );
+      lines = renderPerModel(theme, columnConfig, scopeStats, activeScope, safeWidth, config);
+      break;
 
     case "expanded":
-      return clampLines(renderExpanded(theme, columnConfig, scopeStats, activeScope, safeWidth, config), safeWidth);
+      lines = renderExpanded(theme, columnConfig, scopeStats, activeScope, safeWidth, config);
+      break;
 
     default:
       return [];
   }
+
+  // Apply placement padding for detached mode
+  if (config.placement.mode === "detached") {
+    const { paddingX, paddingY } = config.placement;
+    const hPad = " ".repeat(Math.max(paddingX, 0));
+    const adjustedWidth = Math.max(safeWidth - paddingX * 2, 0);
+
+    // Add vertical padding (blank lines) above and below
+    const paddedLines: string[] = [];
+    for (let i = 0; i < paddingY; i++) {
+      paddedLines.push("");
+    }
+    paddedLines.push(...lines.map((line) => hPad + line));
+    for (let i = 0; i < paddingY; i++) {
+      paddedLines.push("");
+    }
+    lines = clampLines(paddedLines, safeWidth);
+  } else {
+    lines = clampLines(lines, safeWidth);
+  }
+
+  return lines;
 }

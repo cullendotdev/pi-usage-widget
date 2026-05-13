@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import type { TokenStats, BaseStats, ModelStats, ProviderStats, TotalStats, Insight, PeriodInsights, RawMessage, PeriodRawData, GlobalSessionSpan, TimeFilteredStats, UsageData, TabName, ViewMode, TimeScope } from "./types.js";
 import { formatCost, formatTokens, formatNumber, formatScopeLabel } from "./formatting.js";
 import { renderWidget } from "./widget-render.js";
-import { getDefaultConfig } from "./config-persistence.js";
+import { getDefaultConfig, loadConfig } from "./config-persistence.js";
 
 // Re-export types for backward compatibility
 // Legacy display modes preserved for existing usage
@@ -1044,9 +1044,9 @@ class UsageWidget {
 	/** Resolved config snapshot used by renderWidget */
 	private config: ReturnType<typeof getDefaultConfig>;
 
-	constructor(theme: Theme) {
+	constructor(theme: Theme, config?: ReturnType<typeof getDefaultConfig>) {
 		this.theme = theme;
-		this.config = getDefaultConfig();
+		this.config = config ?? getDefaultConfig();
 	}
 
 	setTui(tui: TUI): void {
@@ -1242,8 +1242,11 @@ export default function (pi: ExtensionAPI) {
 			currentWidget = null;
 		}
 
-		// Create a fresh widget for this session
-		const widget = new UsageWidget(ctx.ui.theme);
+		// Load persisted config from disk
+		const loadedConfig = loadConfig();
+
+		// Create a fresh widget for this session with persisted config
+		const widget = new UsageWidget(ctx.ui.theme, loadedConfig);
 		currentWidget = widget;
 
 		// Initial data load
@@ -1252,6 +1255,11 @@ export default function (pi: ExtensionAPI) {
 		await updateWidgetData(widget, controller.signal).catch(() => {});
 		currentAbortController = null;
 
+		// Map placement config to setWidget placement option
+		const placement = loadedConfig.placement.mode === "detached"
+			? "aboveEditor"
+			: "aboveEditor"; // header and footer both render above the editor
+
 		// Register the widget with Pi UI using factory form to access tui.requestRender()
 		ctx.ui.setWidget("usage-stats-widget", (tui, _theme) => {
 			widget.setTui(tui);
@@ -1259,7 +1267,7 @@ export default function (pi: ExtensionAPI) {
 				render: (w: number) => widget.render(w),
 				invalidate: () => widget.invalidate(),
 			};
-		}, { placement: "aboveEditor" });
+		}, { placement });
 
 		// Start periodic refresh
 		startPeriodicRefresh(widget);
