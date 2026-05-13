@@ -32,6 +32,7 @@ import type {
   DisplayMode,
   TimeScope,
   ThemedPreset,
+  ModeColumnConfig,
 } from "./types.js";
 import { colorPresets } from "./color-engine.js";
 
@@ -87,6 +88,38 @@ const PRESET_LABELS: Record<ThemedPreset, string> = {
   nord: "Nord",
   catppuccin: "Catppuccin",
 };
+
+// =============================================================================
+// Column toggle definitions for mode tabs
+// =============================================================================
+
+interface ColumnToggleDef {
+  id: keyof ModeColumnConfig;
+  label: string;
+  description: string;
+}
+
+const ALL_COLUMNS: ColumnToggleDef[] = [
+  { id: "provider", label: "Provider", description: "Show/hide provider name column" },
+  { id: "model", label: "Model", description: "Show/hide model name column" },
+  { id: "sessions", label: "Sessions", description: "Show/hide sessions column" },
+  { id: "msgs", label: "Msgs", description: "Show/hide messages column" },
+  { id: "cost", label: "Cost", description: "Show/hide cost column" },
+  { id: "tokens", label: "Tokens", description: "Show/hide total tokens column" },
+  { id: "tokensIn", label: "Tokens In", description: "Show/hide input tokens column" },
+  { id: "tokensOut", label: "Tokens Out", description: "Show/hide output tokens column" },
+  { id: "cache", label: "Cache", description: "Show/hide cache tokens column" },
+];
+
+/** Map of display mode for each tab index (0-3). 4=Global uses config.defaultMode. */
+const TAB_MODE: Record<number, DisplayMode> = {
+  0: "summary",
+  1: "compact",
+  2: "per-model",
+  3: "expanded",
+};
+
+const TOGGLE_VALUES = ["Show", "Hide"];
 
 // =============================================================================
 // Mock UsageData for live preview
@@ -150,9 +183,13 @@ export class SettingsMenu implements Component {
   // SettingsList for the Global tab
   private globalSettingsList: SettingsList;
 
+  // SettingsLists for the four mode tabs (indices 0-3)
+  private modeSettingsLists: SettingsList[] = [];
+
   // Cached values for the preview
   private previewCache: string[] = [];
   private previewCacheWidth = -1;
+  private previewCacheMode: string = "";
 
   constructor(
     theme: Theme,
@@ -168,6 +205,9 @@ export class SettingsMenu implements Component {
 
     // Build the Global tab SettingsList
     this.globalSettingsList = this.buildGlobalSettingsList();
+
+    // Build all four mode tab SettingsLists
+    this.modeSettingsLists = this.buildModeSettingsLists();
   }
 
   // ===========================================================================
@@ -251,30 +291,129 @@ export class SettingsMenu implements Component {
   }
 
   // ===========================================================================
+  // Mode tab — column toggle settings
+  // ===========================================================================
+
+  /** Get the display mode for the currently active tab. */
+  private getActiveTabMode(): string {
+    if (this.activeTab === 4) return this.config.defaultMode;
+    return TAB_MODE[this.activeTab] ?? "compact";
+  }
+
+  /** Build a SettingsList for a specific display mode's column config. */
+  private buildModeSettingsList(mode: DisplayMode): SettingsList {
+    const theme = createSettingsListTheme(this.theme, false);
+    const columnConfig = this.config.modes[mode];
+    const items: SettingItem[] = [];
+    const isSummary = mode === "summary";
+
+    for (const col of ALL_COLUMNS) {
+      // For summary, provider/model are available but noted as less useful
+      const visible = columnConfig[col.id] as boolean;
+      const desc = isSummary && (col.id === "provider" || col.id === "model")
+        ? col.description + " (less useful in summary mode)"
+        : col.description;
+
+      items.push({
+        id: `${mode}:${col.id}`,
+        label: col.label,
+        description: desc,
+        currentValue: visible ? "Show" : "Hide",
+        values: TOGGLE_VALUES,
+      });
+    }
+
+    // Add totals toggle for non-summary modes
+    if (!isSummary) {
+      items.push({
+        id: `${mode}:showTotals`,
+        label: "Totals Row",
+        description: "Show/hide the totals summary row",
+        currentValue: columnConfig.showTotals ? "Show" : "Hide",
+        values: TOGGLE_VALUES,
+      });
+    }
+
+    const list = new SettingsList(
+      items,
+      14,
+      theme,
+      (id: string, newValue: string) => this.onModeSettingChanged(id, newValue),
+      () => this.done(),
+      { enableSearch: false },
+    );
+
+    return list;
+  }
+
+  /** Build all four mode SettingsLists (one per tab). */
+  private buildModeSettingsLists(): SettingsList[] {
+    return DISPLAY_MODES.map((mode) => this.buildModeSettingsList(mode));
+  }
+
+  /** Handle a column or totals toggle change for a mode tab. */
+  private onModeSettingChanged(id: string, newValue: string): void {
+    // Parse the compound id: "{mode}:{columnId}" or "{mode}:showTotals"
+    const colonIdx = id.indexOf(":");
+    if (colonIdx < 0) return;
+
+    const mode = id.slice(0, colonIdx) as DisplayMode;
+    const settingKey = id.slice(colonIdx + 1);
+    const modeConfig = this.config.modes[mode];
+    if (!modeConfig) return;
+
+    const boolValue = newValue === "Show";
+
+    if (settingKey === "showTotals") {
+      if (modeConfig.showTotals !== boolValue) {
+        modeConfig.showTotals = boolValue;
+        saveConfig(this.config);
+        this.invalidatePreview();
+        this.tui.requestRender();
+      }
+    } else if (settingKey in modeConfig) {
+      const key = settingKey as keyof ModeColumnConfig;
+      const current = modeConfig[key];
+      if (typeof current === "boolean" && current !== boolValue) {
+        (modeConfig as Record<string, boolean>)[settingKey] = boolValue;
+        saveConfig(this.config);
+        this.invalidatePreview();
+        this.tui.requestRender();
+      }
+    }
+  }
+
+  /** Rebuild mode SettingsLists after config changes (e.g., persistence restore). */
+  private rebuildModeSettingsLists(): void {
+    this.modeSettingsLists = this.buildModeSettingsLists();
+  }
+
+  // ===========================================================================
   // Preview rendering
   // ===========================================================================
 
   private invalidatePreview(): void {
     this.previewCacheWidth = -1;
+    this.previewCacheMode = "";
     this.previewCache = [];
   }
 
   private renderPreview(width: number): string[] {
     if (width <= 0) return [];
 
+    const previewMode = this.getActiveTabMode();
+
     // Use cache to avoid re-rendering on every frame
-    if (this.previewCacheWidth === width && this.previewCache.length > 0) {
+    if (this.previewCacheWidth === width && this.previewCacheMode === previewMode && this.previewCache.length > 0) {
       return this.previewCache;
     }
 
     try {
       const mockData = createMockUsageData();
-      const previewConfig = { ...this.config };
-      // Always show in compact mode for preview
-      previewConfig.defaultMode = "compact";
-      const lines = renderWidget(previewConfig, this.theme, mockData, width, "compact");
+      const lines = renderWidget(this.config, this.theme, mockData, width, previewMode);
       this.previewCache = lines;
       this.previewCacheWidth = width;
+      this.previewCacheMode = previewMode;
       return lines;
     } catch {
       // Graceful fallback if renderWidget fails (e.g., no data)
@@ -287,20 +426,17 @@ export class SettingsMenu implements Component {
   // ===========================================================================
 
   private renderTabContent(width: number): string[] {
-    switch (this.activeTab) {
-      case 0: // Summary
-        return [this.theme.fg("dim", "Summary tab — coming in Slice 6")];
-      case 1: // Compact
-        return [this.theme.fg("dim", "Compact tab — coming in Slice 6")];
-      case 2: // Per-Model
-        return [this.theme.fg("dim", "Per-Model tab — coming in Slice 6")];
-      case 3: // Expanded
-        return [this.theme.fg("dim", "Expanded tab — coming in Slice 6")];
-      case 4: // Global
-        return this.globalSettingsList.render(width);
-      default:
-        return [];
+    if (this.activeTab >= 0 && this.activeTab <= 3) {
+      // Mode tabs — render the corresponding SettingsList
+      const list = this.modeSettingsLists[this.activeTab];
+      if (list) return list.render(width);
+      return [this.theme.fg("dim", `No settings for ${TAB_NAMES[this.activeTab]} tab`)];
     }
+    if (this.activeTab === 4) {
+      // Global tab
+      return this.globalSettingsList.render(width);
+    }
+    return [];
   }
 
   // ===========================================================================
@@ -423,18 +559,12 @@ export class SettingsMenu implements Component {
       return;
     }
 
-    // Tab content input — delegate to appropriate handler
-    switch (this.activeTab) {
-      case 0:
-      case 1:
-      case 2:
-      case 3:
-        // Stub tabs — up/down arrows do nothing, Enter does nothing
-        break;
-      case 4:
-        // Global tab — delegate to SettingsList
-        this.globalSettingsList.handleInput(input);
-        break;
+    // Tab content input — delegate to appropriate SettingsList
+    if (this.activeTab >= 0 && this.activeTab <= 3) {
+      const list = this.modeSettingsLists[this.activeTab];
+      if (list) list.handleInput(input);
+    } else if (this.activeTab === 4) {
+      this.globalSettingsList.handleInput(input);
     }
   }
 

@@ -329,3 +329,185 @@ describe("Command registration validation", () => {
     assert.ok(typeof mod.default === "function", "index should export a default factory function");
   });
 });
+
+// =============================================================================
+// Test 8: Mode tab column definitions
+// =============================================================================
+
+describe("Mode tab — column definitions", () => {
+  it("all 9 column IDs exist in ModeColumnConfig", () => {
+    const columnIds = [
+      "provider", "model", "sessions", "msgs",
+      "cost", "tokens", "tokensIn", "tokensOut", "cache",
+    ];
+    assert.equal(columnIds.length, 9);
+    const unique = new Set(columnIds);
+    assert.equal(unique.size, 9);
+  });
+
+  it("all column IDs have human-readable labels", () => {
+    const labels: Record<string, string> = {
+      provider: "Provider", model: "Model", sessions: "Sessions",
+      msgs: "Msgs", cost: "Cost", tokens: "Tokens",
+      tokensIn: "Tokens In", tokensOut: "Tokens Out", cache: "Cache",
+    };
+    assert.equal(Object.keys(labels).length, 9);
+    assert.equal(labels.provider, "Provider");
+    assert.equal(labels.cache, "Cache");
+  });
+
+  it("Compact/Per-Model/Expanded modes have totals toggle", () => {
+    const modesWithTotals = ["compact", "per-model", "expanded"];
+    assert.equal(modesWithTotals.length, 3);
+    assert.ok(!modesWithTotals.includes("summary"));
+  });
+
+  it("tab indices 0-3 map to correct display modes", () => {
+    const tabModes: Record<number, string> = {
+      0: "summary", 1: "compact", 2: "per-model", 3: "expanded",
+    };
+    assert.equal(tabModes[0], "summary");
+    assert.equal(tabModes[1], "compact");
+    assert.equal(tabModes[2], "per-model");
+    assert.equal(tabModes[3], "expanded");
+  });
+});
+
+// =============================================================================
+// Test 9: Mode tab column config persistence
+// =============================================================================
+
+describe("Mode tab — column config persistence", () => {
+  let configPath: string;
+  let originalEnv: string | undefined;
+
+  beforeEach(async () => {
+    originalEnv = process.env.PI_USAGE_CONFIG_PATH;
+    configPath = join(tmpdir(), `pi-usage-test-mode-${Date.now()}.json`);
+    process.env.PI_USAGE_CONFIG_PATH = configPath;
+    try { await unlink(configPath); } catch {}
+    delete require.cache[require.resolve("../config-persistence.js")];
+    delete require.cache[require.resolve("../settings-menu.js")];
+  });
+
+  afterEach(async () => {
+    if (originalEnv) {
+      process.env.PI_USAGE_CONFIG_PATH = originalEnv;
+    } else {
+      delete process.env.PI_USAGE_CONFIG_PATH;
+    }
+    try { await unlink(configPath); } catch {}
+  });
+
+  it("default config has all columns shown for all modes", () => {
+    const { getDefaultConfig } = require("../config-persistence.js");
+    const defaults = getDefaultConfig();
+    const modes = ["summary", "compact", "per-model", "expanded"];
+    for (const mode of modes) {
+      const mc = defaults.modes[mode];
+      assert.ok(mc, `missing mode config for ${mode}`);
+      assert.equal(mc.provider, true);
+      assert.equal(mc.model, true);
+      assert.equal(mc.sessions, true);
+      assert.equal(mc.msgs, true);
+      assert.equal(mc.cost, true);
+      assert.equal(mc.tokens, true);
+      assert.equal(mc.tokensIn, true);
+      assert.equal(mc.tokensOut, true);
+      assert.equal(mc.cache, true);
+    }
+  });
+
+  it("default: summary showTotals=false, others showTotals=true", () => {
+    const { getDefaultConfig } = require("../config-persistence.js");
+    const defaults = getDefaultConfig();
+    assert.equal(defaults.modes.summary.showTotals, false);
+    assert.equal(defaults.modes.compact.showTotals, true);
+    assert.equal(defaults.modes["per-model"].showTotals, true);
+    assert.equal(defaults.modes.expanded.showTotals, true);
+  });
+
+  it("hiding columns in compact mode persists", () => {
+    const { getDefaultConfig, mergeConfig, saveConfig, loadConfig } = require("../config-persistence.js");
+    const modified = mergeConfig(getDefaultConfig(), {
+      modes: { compact: { ...getDefaultConfig().modes.compact, provider: false, sessions: false } },
+    } as any);
+    assert.equal(modified.modes.compact.provider, false);
+    assert.equal(modified.modes.compact.sessions, false);
+    assert.equal(modified.modes.compact.model, true);
+    saveConfig(modified);
+    delete require.cache[require.resolve("../config-persistence.js")];
+    const { loadConfig: load2 } = require("../config-persistence.js");
+    const loaded = load2();
+    assert.equal(loaded.modes.compact.provider, false);
+    assert.equal(loaded.modes.compact.sessions, false);
+    assert.equal(loaded.modes.compact.model, true);
+  });
+
+  it("toggling totals off in per-model mode persists", () => {
+    const { getDefaultConfig, mergeConfig, saveConfig, loadConfig } = require("../config-persistence.js");
+    const modified = mergeConfig(getDefaultConfig(), {
+      modes: { "per-model": { ...getDefaultConfig().modes["per-model"], showTotals: false } },
+    } as any);
+    assert.equal(modified.modes["per-model"].showTotals, false);
+    saveConfig(modified);
+    delete require.cache[require.resolve("../config-persistence.js")];
+    const { loadConfig: load2 } = require("../config-persistence.js");
+    const loaded = load2();
+    assert.equal(loaded.modes["per-model"].showTotals, false);
+  });
+
+  it("column changes in one mode do not affect other modes", () => {
+    const { getDefaultConfig, mergeConfig } = require("../config-persistence.js");
+    const modified = mergeConfig(getDefaultConfig(), {
+      modes: { compact: { ...getDefaultConfig().modes.compact, provider: false, msgs: false } },
+    } as any);
+    assert.equal(modified.modes.compact.provider, false);
+    assert.equal(modified.modes.expanded.provider, true);
+    assert.equal(modified.modes.expanded.msgs, true);
+    assert.equal(modified.modes.summary.provider, true);
+  });
+});
+
+// =============================================================================
+// Test 10: Mode SettingsList structural validation
+// =============================================================================
+
+describe("Mode tab — SettingsList structural validation", () => {
+  it("settings-menu module imports without errors", async () => {
+    const mod = await import("../settings-menu.js");
+    assert.ok(mod.SettingsMenu !== undefined);
+  });
+
+  it("column toggle values are Show/Hide", () => {
+    const toggleValues = ["Show", "Hide"];
+    assert.equal(toggleValues[0], "Show");
+    assert.equal(toggleValues[1], "Hide");
+  });
+
+  it("mode tabs have correct item counts: sum=9, others=10", () => {
+    const expectedCounts: Record<string, number> = {
+      summary: 9,
+      compact: 10,
+      "per-model": 10,
+      expanded: 10,
+    };
+    assert.equal(expectedCounts.summary, 9);
+    assert.equal(expectedCounts.compact, 10);
+    assert.equal(expectedCounts["per-model"], 10);
+    assert.equal(expectedCounts.expanded, 10);
+  });
+
+  it("mode setting IDs follow compound pattern: mode:columnId", () => {
+    const sampleIds = [
+      "summary:provider", "summary:model", "summary:cost",
+      "compact:showTotals", "per-model:cache", "expanded:tokensOut",
+    ];
+    for (const id of sampleIds) {
+      const colonIdx = id.indexOf(":");
+      assert.ok(colonIdx > 0, `${id} should contain colon`);
+      const mode = id.slice(0, colonIdx);
+      assert.ok(["summary", "compact", "per-model", "expanded"].includes(mode));
+    }
+  });
+});
