@@ -905,6 +905,16 @@ const SCOPE_ORDER: TimeScope[] = [
 	"allTime",
 ];
 
+const TAB_ORDER: TimeScope[] = [
+	"lastHour",
+	"today",
+	"yesterday",
+	"thisWeek",
+	"lastWeek",
+	"thisMonth",
+	"allTime",
+];
+
 class UsageComponent {
 	private activeTab: TabName = "allTime";
 	private viewMode: ViewMode = "table";
@@ -1384,7 +1394,7 @@ class UsageWidget {
 
 		const rawPrefix = prefix ?? " ".repeat(indent);
 		const safePrefix = layout.nameWidth > 0 ? truncateToWidth(rawPrefix, layout.nameWidth, "") : "";
-		const prefixWidth = safePrefix.length;
+		const prefixWidth = visibleWidth(safePrefix);
 		const innerNameWidth = Math.max(layout.nameWidth - prefixWidth, 0);
 		const truncName = innerNameWidth > 0 ? truncateToWidth(name, innerNameWidth) : "";
 		const styledName = dimAll ? th.fg("dim", truncName) : truncName;
