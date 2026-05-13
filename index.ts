@@ -13,89 +13,13 @@ import { CancellableLoader, Container, Spacer, matchesKey, visibleWidth, truncat
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import type { TokenStats, BaseStats, ModelStats, ProviderStats, TotalStats, Insight, PeriodInsights, RawMessage, PeriodRawData, GlobalSessionSpan, TimeFilteredStats, UsageData, TabName, ViewMode, TimeScope } from "./types.js";
+import { formatCost, formatTokens, formatNumber, formatScopeLabel } from "./formatting.js";
+import { renderWidget } from "./widget-render.js";
+import { getDefaultConfig } from "./config-persistence.js";
 
-// =============================================================================
-// Types
-// =============================================================================
-
-interface TokenStats {
-	total: number;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-}
-
-interface BaseStats {
-	messages: number;
-	cost: number;
-	tokens: TokenStats;
-}
-
-interface ModelStats extends BaseStats {
-	sessions: Set<string>;
-}
-
-interface ProviderStats extends BaseStats {
-	sessions: Set<string>;
-	models: Map<string, ModelStats>;
-}
-
-interface TotalStats extends BaseStats {
-	sessions: number;
-}
-
-interface Insight {
-	percent: number; // 0-100
-	headline: string;
-	advice: string;
-}
-
-interface PeriodInsights {
-	insights: Insight[];
-}
-
-interface RawMessage {
-	sessionId: string;
-	timestamp: number;
-	cost: number;
-	input: number;
-	cacheRead: number;
-	cacheWrite: number;
-}
-
-interface PeriodRawData {
-	messages: RawMessage[];
-	sessionCosts: Map<string, number>;
-}
-
-interface GlobalSessionSpan {
-	startMs: number;
-	endMs: number;
-}
-
-interface TimeFilteredStats {
-	providers: Map<string, ProviderStats>;
-	totals: TotalStats;
-	insights: PeriodInsights;
-}
-
-interface UsageData {
-	lastHour: TimeFilteredStats;
-	today: TimeFilteredStats;
-	yesterday: TimeFilteredStats;
-	thisWeek: TimeFilteredStats;
-	lastWeek: TimeFilteredStats;
-	thisMonth: TimeFilteredStats;
-	allTime: TimeFilteredStats;
-}
-
-type TabName = "today" | "thisWeek" | "lastWeek" | "allTime";
-type ViewMode = "table" | "insights";
-
-type TimeScope = "lastHour" | "today" | "yesterday" | "thisWeek" | "lastWeek" | "thisMonth" | "allTime";
-
-// Display modes for the footer widget
+// Re-export types for backward compatibility
+// Legacy display modes preserved for existing usage
 type DisplayMode = "summary" | "compact" | "detailed-collapsed" | "detailed-expanded" | "hidden";
 
 // =============================================================================
@@ -699,67 +623,8 @@ function computeParallelCostWeight(messages: RawMessage[]): number | null {
 	return parallelCost;
 }
 
-function formatThresholdTokens(n: number): string {
-	if (n >= 1_000_000) return `${n / 1_000_000}M`;
-	if (n >= 1_000) return `${n / 1_000}k`;
-	return String(n);
-}
-
-function formatInsightPercent(p: number): string {
-	if (p >= 10) return `${Math.round(p)}%`;
-	return `${Math.round(p * 10) / 10}%`;
-}
-
-// =============================================================================
-// Formatting Helpers
-// =============================================================================
-
-function formatCost(cost: number): string {
-	if (cost === 0) return "-";
-	if (cost < 0.01) return `$${cost.toFixed(4)}`;
-	if (cost < 1) return `$${cost.toFixed(2)}`;
-	if (cost < 10) return `$${cost.toFixed(2)}`;
-	if (cost < 100) return `$${cost.toFixed(1)}`;
-	return `$${Math.round(cost)}`;
-}
-
-function formatTokens(count: number): string {
-	if (count === 0) return "-";
-	if (count < 1000) return count.toString();
-	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-	if (count < 1000000) return `${Math.round(count / 1000)}k`;
-	if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
-	return `${Math.round(count / 1000000)}M`;
-}
-
-function formatNumber(n: number): string {
-	if (n === 0) return "-";
-	return n.toLocaleString();
-}
-
-function formatCostFixed3(cost: number): string {
-	if (cost === 0) return "-";
-	return `$${cost.toFixed(3)}`;
-}
-
-function formatScopeLabel(scope: TimeScope): string {
-	switch (scope) {
-		case "lastHour":
-			return "Last Hour";
-		case "today":
-			return "Today";
-		case "yesterday":
-			return "Yesterday";
-		case "thisWeek":
-			return "This Week";
-		case "lastWeek":
-			return "Last Week";
-		case "thisMonth":
-			return "This Month";
-		case "allTime":
-			return "All Time";
-	}
-}
+// Re-imported from formatting.ts
+import { formatThresholdTokens, formatInsightPercent } from "./formatting.js";
 
 function padLeft(s: string, len: number): string {
 	const vis = visibleWidth(s);
@@ -821,58 +686,6 @@ function getTableLayout(width: number): TableLayout {
 	};
 }
 
-// Widget-specific cost column (3 decimal places)
-const WIDGET_COST_COLUMN: DataColumn = {
-	label: "Cost",
-	width: 9,
-	getValue: (s) => formatCostFixed3(s.cost),
-};
-
-const WIDGET_FULL_DATA_COLUMNS: DataColumn[] = [
-	SESSIONS_COLUMN,
-	MSGS_COLUMN,
-	WIDGET_COST_COLUMN,
-	TOKENS_COLUMN,
-	INPUT_COLUMN,
-	OUTPUT_COLUMN,
-	CACHE_COLUMN,
-];
-
-const WIDGET_TABLE_LAYOUTS: TableLayoutCandidate[] = [
-	{ columns: WIDGET_FULL_DATA_COLUMNS, minNameWidth: MAX_NAME_COL_WIDTH },
-	{ columns: [SESSIONS_COLUMN, MSGS_COLUMN, WIDGET_COST_COLUMN, TOKENS_COLUMN], minNameWidth: 14, compact: true },
-	{ columns: [SESSIONS_COLUMN, WIDGET_COST_COLUMN, TOKENS_COLUMN], minNameWidth: 12, compact: true },
-	{ columns: [WIDGET_COST_COLUMN, TOKENS_COLUMN], minNameWidth: 10, compact: true },
-	{ columns: [WIDGET_COST_COLUMN], minNameWidth: 8, compact: true },
-];
-
-function getWidgetTableLayout(width: number): TableLayout {
-	const safeWidth = Math.max(width, 0);
-
-	for (const candidate of WIDGET_TABLE_LAYOUTS) {
-		const columnsWidth = sumColumnWidths(candidate.columns);
-		const nameWidth = Math.min(MAX_NAME_COL_WIDTH, Math.max(safeWidth - columnsWidth, 0));
-		if (nameWidth >= candidate.minNameWidth) {
-			return {
-				columns: candidate.columns,
-				nameWidth,
-				tableWidth: nameWidth + columnsWidth,
-				compact: candidate.compact ?? false,
-			};
-		}
-	}
-
-	const fallback = WIDGET_TABLE_LAYOUTS[WIDGET_TABLE_LAYOUTS.length - 1]!;
-	const fallbackColumnsWidth = sumColumnWidths(fallback.columns);
-	const fallbackNameWidth = Math.min(MAX_NAME_COL_WIDTH, Math.max(safeWidth - fallbackColumnsWidth, 0));
-	return {
-		columns: fallback.columns,
-		nameWidth: fallbackNameWidth,
-		tableWidth: fallbackNameWidth + fallbackColumnsWidth,
-		compact: fallback.compact ?? false,
-	};
-}
-
 // =============================================================================
 // Component
 // =============================================================================
@@ -890,8 +703,8 @@ const TAB_LABELS: Record<TimeScope, string> = {
 const DISPLAY_MODE_ORDER: DisplayMode[] = [
 	"summary",
 	"compact",
-	"detailed-collapsed",
-	"detailed-expanded",
+	"per-model",
+	"expanded",
 	"hidden",
 ];
 
@@ -1228,9 +1041,12 @@ class UsageWidget {
 	private usageData: UsageData | null = null;
 	private theme: Theme;
 	private tui: TUI | null = null;
+	/** Resolved config snapshot used by renderWidget */
+	private config: ReturnType<typeof getDefaultConfig>;
 
 	constructor(theme: Theme) {
 		this.theme = theme;
+		this.config = getDefaultConfig();
 	}
 
 	setTui(tui: TUI): void {
@@ -1272,168 +1088,19 @@ class UsageWidget {
 		this.setScope(next);
 	}
 
-	// Main render function returns lines to display in the widget area
+	// Main render function — delegates to the pure render engine
 	render(width: number): string[] {
-		const th = this.theme;
-
-		// Hidden mode
-		if (this.displayMode === "hidden") {
-			return [];
-		}
-
-		// If no data yet, show loading/empty placeholder
+		// Loading placeholder — renderWidget requires data
 		if (!this.usageData) {
-			return [th.fg("dim", "Usage: Loading...")];
+			return [this.theme.fg("dim", "Usage: Loading...")];
 		}
 
-		const dataForScope = this.usageData[this.scope] as TimeFilteredStats;
+		// Build a config snapshot with current mode/scope
+		const activeConfig = { ...this.config };
+		activeConfig.defaultMode = this.displayMode;
+		activeConfig.defaultScope = this.scope;
 
-		// Summary mode
-		if (this.displayMode === "summary") {
-			if (dataForScope.totals.messages === 0) {
-				const label = formatScopeLabel(this.scope);
-				return [th.fg("dim", `Usage: --- (${label})`)];
-			}
-			const costStr = formatCostFixed3(dataForScope.totals.cost);
-			const label = formatScopeLabel(this.scope);
-			return [
-				th.fg("muted", "Usage: ") +
-				th.fg("text", costStr) +
-				th.fg("muted", ` (${label})`),
-      ];
-		}
-
-		// Compact mode
-		if (this.displayMode === "compact") {
-			if (dataForScope.totals.messages === 0) {
-				return [th.fg("dim", `Usage: --- (${formatScopeLabel(this.scope)})`)];
-			}
-			const lines: string[] = [];
-			lines.push(th.fg("muted", `Usage: (${formatScopeLabel(this.scope)})`));
-			// Sort providers by cost descending
-			const providers = Array.from(dataForScope.providers.entries())
-				.sort((a, b) => b[1].cost - a[0].cost);
-			for (const [provider, stats] of providers) {
-				const costStr = formatCostFixed3(stats.cost);
-				lines.push(
-					th.fg("muted", "  ") +
-					th.fg("muted", provider) +
-					th.fg("text", ": ") +
-					th.fg("text", costStr));
-			}
-			return lines;
-		}
-
-		// Detailed modes (collapsed or expanded) use table rendering
-		const layout = getWidgetTableLayout(width);
-		const lines: string[] = [];
-
-		// Title line with scope
-		lines.push(th.fg("muted", `Usage: (${formatScopeLabel(this.scope)})`));
-
-		// Header
-		lines.push(...this.renderTableHeader(width, layout));
-
-		// Rows
-		const providerOrder = Array.from(dataForScope.providers.entries())
-			.sort((a, b) => b[1].cost - a[0].cost)
-			.map(([name]) => name);
-
-		if (providerOrder.length === 0) {
-			lines.push(th.fg("dim", "  No usage data for this period"));
-		} else {
-			for (let i = 0; i < providerOrder.length; i++) {
-				const providerName = providerOrder[i]!;
-				const providerStats = dataForScope.providers.get(providerName)!;
-				const isExpanded = this.displayMode === "detailed-expanded";
-				const arrow = isExpanded ? "▾" : "▸";
-				const prefix = th.fg("dim", `${arrow} `);
-				lines.push(
-					this.renderDataRow(providerName, providerStats, layout, {
-						prefix,
-					})
-				);
-
-				if (isExpanded) {
-					const models = Array.from(providerStats.models.entries())
-						.sort((a, b) => b[1].cost - a[0].cost);
-					for (const [modelName, modelStats] of models) {
-						lines.push(
-							this.renderDataRow(modelName, modelStats, layout, {
-							indent: 4,
-							dimAll: true,
-						})
-					);
-					}
-				}
-			}
-		}
-
-		// Totals
-		lines.push(...this.renderTotals(layout));
-
-		// Formula note
-		lines.push(...this.renderFormulaNote(width));
-
-		return lines;
-	}
-
-	private renderTableHeader(width: number, layout: TableLayout): string[] {
-		const th = this.theme;
-		let headerLine = fitCell("Provider / Model", layout.nameWidth);
-		for (const col of layout.columns) {
-			const label = fitCell(col.label, col.width, "right");
-			headerLine += col.dimmed ? th.fg("dim", label) : label;
-		}
-		return [th.fg("muted", headerLine), th.fg("border", "─".repeat(layout.tableWidth))];
-	}
-
-	private renderDataRow(
-		name: string,
-		stats: BaseStats & { sessions: Set<string> | number },
-		layout: TableLayout,
-		options: { indent?: number; dimAll?: boolean; prefix?: string } = {}
-	): string {
-		const th = this.theme;
-		const { indent = 0, dimAll = false, prefix } = options;
-
-		const rawPrefix = prefix ?? " ".repeat(indent);
-		const safePrefix = layout.nameWidth > 0 ? truncateToWidth(rawPrefix, layout.nameWidth, "") : "";
-		const prefixWidth = visibleWidth(safePrefix);
-		const innerNameWidth = Math.max(layout.nameWidth - prefixWidth, 0);
-		const truncName = innerNameWidth > 0 ? truncateToWidth(name, innerNameWidth) : "";
-		const styledName = dimAll ? th.fg("dim", truncName) : truncName;
-
-		let row = safePrefix + (innerNameWidth > 0 ? padRight(styledName, innerNameWidth) : "");
-
-		for (const col of layout.columns) {
-			const value = fitCell(col.getValue(stats), col.width, "right");
-			const shouldDim = col.dimmed || dimAll;
-			row += shouldDim ? th.fg("dim", value) : value;
-		}
-
-		return row;
-	}
-
-	private renderTotals(layout: TableLayout): string[] {
-		const th = this.theme;
-		const stats = this.usageData![this.scope] as TimeFilteredStats;
-		let totalRow = fitCell(th.bold("Total"), layout.nameWidth);
-		for (const col of layout.columns) {
-			const value = fitCell(col.getValue(stats.totals), col.width, "right");
-			totalRow += col.dimmed ? th.fg("dim", value) : value;
-		}
-		return [th.fg("border", "─".repeat(layout.tableWidth)), totalRow, ""];
-	}
-
-	private renderFormulaNote(width: number): string[] {
-		const line = pickFittingText(width, [
-			"Tokens = Input + Output + CacheWrite  ·  ↑In = Input + CacheWrite  (as of 0.2.0)",
-			"Tokens = In + Out + CacheWrite  ·  ↑In = In + CacheWrite  (v0.2.0+)",
-			"Tokens & ↑In include CacheWrite (v0.2.0+)",
-			"Incl. CacheWrite (v0.2.0+)",
-		]);
-		return [this.theme.fg("dim", line), ""];
+		return renderWidget(activeConfig, this.theme, this.usageData, width);
 	}
 }
 
