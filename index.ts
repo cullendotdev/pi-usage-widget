@@ -17,6 +17,7 @@ import type { TokenStats, BaseStats, ModelStats, ProviderStats, TotalStats, Insi
 import { formatCost, formatTokens, formatNumber, formatScopeLabel } from "./formatting.js";
 import { renderWidget } from "./widget-render.js";
 import { getDefaultConfig, loadConfig } from "./config-persistence.js";
+import { SettingsMenu } from "./settings-menu.js";
 
 // Re-export types for backward compatibility
 // Legacy display modes preserved for existing usage
@@ -1352,6 +1353,24 @@ export default function (pi: ExtensionAPI) {
 			if (currentWidget) {
 				currentWidget.cycleScope();
 			}
+		},
+	});
+
+	pi.registerCommand("usage-settings", {
+		description: "Open usage widget settings",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			if (!ctx.hasUI) return;
+
+			await ctx.ui.custom<void>((tui, theme, _kb, done) => {
+				const menu = new SettingsMenu(theme, tui, () => done());
+
+				return {
+					render: (w: number) => menu.render(w),
+					invalidate: () => {},
+					handleInput: (input: string) => menu.handleInput(input),
+					dispose: () => menu.dispose(),
+				};
+			});
 		},
 	});
 }
