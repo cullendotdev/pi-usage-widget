@@ -1219,7 +1219,7 @@ class UsageComponent {
 }
 
 // =============================================================================
-// Footer Widget
+// Widget
 // =============================================================================
 
 class UsageWidget {
@@ -1297,23 +1297,29 @@ class UsageWidget {
 			const costStr = formatCostFixed3(dataForScope.totals.cost);
 			const label = formatScopeLabel(this.scope);
 			return [
-				th.fg("muted", "Usage: ") + th.fg("accent", costStr) + th.fg("muted", ` (${label})`),
-			];
+				th.fg("muted", "Usage: ") +
+				th.fg("text", costStr) +
+				th.fg("muted", ` (${label})`),
+      ];
 		}
 
 		// Compact mode
 		if (this.displayMode === "compact") {
 			if (dataForScope.totals.messages === 0) {
-				return [th.fg("dim", `Usage (${formatScopeLabel(this.scope)}): no data`)];
+				return [th.fg("dim", `Usage: --- (${formatScopeLabel(this.scope)})`)];
 			}
 			const lines: string[] = [];
-			lines.push(th.fg("accent", `Usage (${formatScopeLabel(this.scope)}):`));
+			lines.push(th.fg("muted", `Usage: (${formatScopeLabel(this.scope)})`));
 			// Sort providers by cost descending
 			const providers = Array.from(dataForScope.providers.entries())
 				.sort((a, b) => b[1].cost - a[0].cost);
 			for (const [provider, stats] of providers) {
 				const costStr = formatCostFixed3(stats.cost);
-				lines.push(th.fg("muted", "  ") + provider + th.fg("accent", ": ") + th.fg("accent", costStr));
+				lines.push(
+					th.fg("muted", "  ") +
+					th.fg("muted", provider) +
+					th.fg("text", ": ") +
+					th.fg("text", costStr));
 			}
 			return lines;
 		}
@@ -1323,8 +1329,7 @@ class UsageWidget {
 		const lines: string[] = [];
 
 		// Title line with scope
-		lines.push(th.fg("accent", `Usage (${formatScopeLabel(this.scope)})`));
-		lines.push("");
+		lines.push(th.fg("muted", `Usage: (${formatScopeLabel(this.scope)})`));
 
 		// Header
 		lines.push(...this.renderTableHeader(width, layout));
@@ -1342,7 +1347,7 @@ class UsageWidget {
 				const providerStats = dataForScope.providers.get(providerName)!;
 				const isExpanded = this.displayMode === "detailed-expanded";
 				const arrow = isExpanded ? "▾" : "▸";
-				const prefix = i === 0 ? th.fg("accent", `${arrow} `) : th.fg("dim", `${arrow} `);
+				const prefix = th.fg("dim", `${arrow} `);
 				lines.push(
 					this.renderDataRow(providerName, providerStats, layout, {
 						prefix,
