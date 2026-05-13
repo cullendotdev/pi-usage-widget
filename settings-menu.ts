@@ -1,9 +1,10 @@
 /**
  * Settings menu TUI — interactive `/usage-settings` command.
  *
- * Renders a 5-tab shell with live preview pane. The Global tab is fully
- * functional (mode, scope, preset selectors). Other tabs are stubs for
- * Slice 6 (Mode tabs), Slice 7 (Color pickers), and Slice 8 (Placement).
+ * Renders a 5-tab shell with live preview pane. Full implementation:
+ *   - Global tab: display mode, time scope, theme preset, Global Colors
+ *   - Mode tabs: column toggles, totals, per-mode color overrides
+ *   - Color picker submenu for per-element color editing
  *
  * Exports:
  *   - SettingsMenu — Component that manages tab state, rendering, and input
@@ -33,8 +34,11 @@ import type {
   TimeScope,
   ThemedPreset,
   ModeColumnConfig,
+  ColorOverrides,
 } from "./types.js";
-import { colorPresets } from "./color-engine.js";
+import { colorPresets, colorElements, resolveColor, hexToAnsi } from "./color-engine.js";
+import type { ColorElement } from "./color-engine.js";
+import { ColorPicker, ELEMENT_LABELS, renderColorSwatch, validateHex } from "./color-picker.js";
 
 // =============================================================================
 // Constants
@@ -121,6 +125,9 @@ const TAB_MODE: Record<number, DisplayMode> = {
 
 const TOGGLE_VALUES = ["Show", "Hide"];
 
+// Focus section for tabs that have both settings and color sections
+type FocusSection = "settings" | "colors";
+
 // =============================================================================
 // Mock UsageData for live preview
 // =============================================================================
@@ -154,11 +161,9 @@ export function createMockUsageData(): UsageData {
 function createSettingsListTheme(theme: Theme, isGlobal: boolean = true): SettingsListTheme {
   return {
     label: (text: string, _selected: boolean) => {
-      // Labels always rendered in dim white
       return theme.fg(isGlobal ? "text" : "dim", text);
     },
     value: (text: string, selected: boolean) => {
-      // Selected value gets accent; unselected gets text color
       return theme.fg(selected ? "accent" : "text", text);
     },
     description: (text: string) => {
@@ -189,7 +194,19 @@ export class SettingsMenu implements Component {
   // Cached values for the preview
   private previewCache: string[] = [];
   private previewCacheWidth = -1;
-  private previewCacheMode: string = "";
+  private previewCacheMode = "";
+
+  // Color picker integration
+  private colorPicker: ColorPicker | null = null;
+  /** Which element is currently being edited (null = none) */
+  private editingElement: ColorElement | null = null;
+  /** Which mode's override is being edited (null = global) */
+  private editingMode: DisplayMode | null = null;
+
+  // Color section navigation
+  private focusSection: FocusSection = "settings";
+  private colorElementIndex = 0;
+  private colorScrollOffset = 0;
 
   constructor(
     theme: Theme,
@@ -243,10 +260,10 @@ export class SettingsMenu implements Component {
 
     const list = new SettingsList(
       items,
-      12, // maxVisible — show all items
+      12,
       theme,
       (id: string, newValue: string) => this.onGlobalSettingChanged(id, newValue),
-      () => this.done(), // Escape cancels → close menu
+      () => this.done(),
       { enableSearch: false },
     );
 
@@ -308,7 +325,6 @@ export class SettingsMenu implements Component {
     const isSummary = mode === "summary";
 
     for (const col of ALL_COLUMNS) {
-      // For summary, provider/model are available but noted as less useful
       const visible = columnConfig[col.id] as boolean;
       const desc = isSummary && (col.id === "provider" || col.id === "model")
         ? col.description + " (less useful in summary mode)"
@@ -323,7 +339,6 @@ export class SettingsMenu implements Component {
       });
     }
 
-    // Add totals toggle for non-summary modes
     if (!isSummary) {
       items.push({
         id: `${mode}:showTotals`,
@@ -346,14 +361,11 @@ export class SettingsMenu implements Component {
     return list;
   }
 
-  /** Build all four mode SettingsLists (one per tab). */
   private buildModeSettingsLists(): SettingsList[] {
     return DISPLAY_MODES.map((mode) => this.buildModeSettingsList(mode));
   }
 
-  /** Handle a column or totals toggle change for a mode tab. */
   private onModeSettingChanged(id: string, newValue: string): void {
-    // Parse the compound id: "{mode}:{columnId}" or "{mode}:showTotals"
     const colonIdx = id.indexOf(":");
     if (colonIdx < 0) return;
 
@@ -383,9 +395,215 @@ export class SettingsMenu implements Component {
     }
   }
 
-  /** Rebuild mode SettingsLists after config changes (e.g., persistence restore). */
-  private rebuildModeSettingsLists(): void {
-    this.modeSettingsLists = this.buildModeSettingsLists();
+  // ===========================================================================
+  // Color picker integration
+  // ===========================================================================
+
+  /**
+   * Open the color picker for a specific element.
+   * @param element  The color element to edit
+   * @param mode     Display mode for per-mode overrides (null = global)
+   */
+  private openColorPicker(element: ColorElement, mode: DisplayMode | null): void {
+    this.editingElement = element;
+    this.editingMode = mode;
+
+    // Get current color value
+    let currentColor: string | null;
+    if (mode) {
+      currentColor = this.config.perModeColorOverrides[mode][element] ?? null;
+    } else {
+      currentColor = this.config.globalColorOverrides[element] ?? null;
+    }
+
+    this.colorPicker = new ColorPicker(
+      this.theme,
+      currentColor,
+      // onSelect
+      (color: string | null) => {
+        this.applyColorChange(element, mode, color);
+        this.colorPicker = null;
+        this.editingElement = null;
+        this.editingMode = null;
+        this.tui.requestRender();
+      },
+      // onCancel
+      () => {
+        this.colorPicker = null;
+        this.editingElement = null;
+        this.editingMode = null;
+        this.tui.requestRender();
+      },
+    );
+
+    this.tui.requestRender();
+  }
+
+  /** Apply a color change to the config and save. */
+  private applyColorChange(
+    element: ColorElement,
+    mode: DisplayMode | null,
+    color: string | null,
+  ): void {
+    if (mode) {
+      this.config.perModeColorOverrides[mode][element] = color;
+    } else {
+      this.config.globalColorOverrides[element] = color;
+    }
+    saveConfig(this.config);
+    this.invalidatePreview();
+  }
+
+  /** Get the override object for the current editing context. */
+  private getCurrentOverrides(): ColorOverrides {
+    if (this.editingMode) {
+      return this.config.perModeColorOverrides[this.editingMode];
+    }
+    return this.config.globalColorOverrides;
+  }
+
+  // ===========================================================================
+  // Color element rendering helpers
+  // ===========================================================================
+
+  /** Get the display text for a color value (hex, role name, or "(inherit)"). */
+  private getColorDisplayText(value: string | null): string {
+    if (value === null || value === "") return "(inherit)";
+    return value;
+  }
+
+  /** Get a color swatch for the resolved color of an element. */
+  private getResolvedColorSwatch(element: ColorElement, mode: DisplayMode | null): string {
+    try {
+      const ansi = resolveColor(element, this.config, mode ? { mode } : undefined);
+      // Extract hex from ANSI truecolor if possible, otherwise use approximation
+      const trueColorMatch = ansi.match(/38;2;(\d+);(\d+);(\d+)/);
+      if (trueColorMatch) {
+        const r = parseInt(trueColorMatch[1]);
+        const g = parseInt(trueColorMatch[2]);
+        const b = parseInt(trueColorMatch[3]);
+        const hex = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+        return renderColorSwatch(hex);
+      }
+      // Fallback for non-truecolor modes — just use the ansi code itself
+      return `${ansi}██\x1b[0m`;
+    } catch {
+      return "??";
+    }
+  }
+
+  // ===========================================================================
+  // Color elements section rendering (Global tab)
+  // ===========================================================================
+
+  /** Render the Global Colors section. */
+  private renderGlobalColorsSection(width: number): string[] {
+    const lines: string[] = [];
+    const innerWidth = width - 4;
+    const maxVisible = Math.min(colorElements.length, 14);
+    const isFocused = this.focusSection === "colors";
+
+    // Section header
+    lines.push("");
+    lines.push("  " + this.theme.fg("dim", isFocused ? "┌─ Global Colors (c=settings) ─" + "─".repeat(Math.max(0, innerWidth - 27)) : "┌─ Global Colors (c) " + "─".repeat(Math.max(0, innerWidth - 22))));
+    lines.push("");
+
+    // Adjust scroll offset
+    if (this.colorElementIndex < this.colorScrollOffset) {
+      this.colorScrollOffset = this.colorElementIndex;
+    } else if (this.colorElementIndex >= this.colorScrollOffset + maxVisible) {
+      this.colorScrollOffset = this.colorElementIndex - maxVisible + 1;
+    }
+
+    if (this.colorScrollOffset > 0) {
+      lines.push("  " + this.theme.fg("dim", "  ↑ ..."));
+    }
+
+    for (let i = this.colorScrollOffset; i < Math.min(this.colorScrollOffset + maxVisible, colorElements.length); i++) {
+      const element = colorElements[i];
+      const label = ELEMENT_LABELS[element] ?? element;
+      const isSelected = isFocused && i === this.colorElementIndex;
+      const cursor = isSelected ? this.theme.fg("accent", "▸") : " ";
+
+      // Get current override value (global)
+      const overrideVal = this.config.globalColorOverrides[element];
+      const swatch = this.getResolvedColorSwatch(element, null);
+      const valueText = overrideVal
+        ? this.theme.fg(isSelected ? "accent" : "text", overrideVal)
+        : this.theme.fg("dim", "(inherit)");
+
+      const labelText = isSelected
+        ? this.theme.fg("accent", label.padEnd(18))
+        : this.theme.fg("text", label.padEnd(18));
+
+      lines.push(`  ${cursor} ${swatch} ${labelText} ${valueText}`);
+    }
+
+    if (this.colorScrollOffset + maxVisible < colorElements.length) {
+      lines.push("  " + this.theme.fg("dim", "  ↓ ..."));
+    }
+
+    lines.push("");
+    lines.push("  " + this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))));
+
+    return lines;
+  }
+
+  /** Render the per-mode color overrides section. */
+  private renderModeColorSection(mode: DisplayMode, width: number): string[] {
+    const lines: string[] = [];
+    const innerWidth = width - 4;
+    const overrides = this.config.perModeColorOverrides[mode];
+    const maxVisible = Math.min(colorElements.length, 10);
+    const isFocused = this.focusSection === "colors";
+
+    // Section header
+    lines.push("");
+    lines.push("  " + this.theme.fg("dim", isFocused ? "┌─ Color Overrides (c=settings) ─" + "─".repeat(Math.max(0, innerWidth - 32)) : "┌─ Color Overrides (c) " + "─".repeat(Math.max(0, innerWidth - 27))));
+    lines.push("");
+
+    // Adjust scroll offset
+    if (this.colorElementIndex < this.colorScrollOffset) {
+      this.colorScrollOffset = this.colorElementIndex;
+    } else if (this.colorElementIndex >= this.colorScrollOffset + maxVisible) {
+      this.colorScrollOffset = this.colorElementIndex - maxVisible + 1;
+    }
+
+    if (this.colorScrollOffset > 0) {
+      lines.push("  " + this.theme.fg("dim", "  ↑ ..."));
+    }
+
+    for (let i = this.colorScrollOffset; i < Math.min(this.colorScrollOffset + maxVisible, colorElements.length); i++) {
+      const element = colorElements[i];
+      const label = ELEMENT_LABELS[element] ?? element;
+      const isSelected = isFocused && i === this.colorElementIndex;
+      const cursor = isSelected ? this.theme.fg("accent", "▸") : " ";
+
+      const overrideVal = overrides[element];
+      const swatch = this.getResolvedColorSwatch(element, mode);
+      const isOverridden = overrideVal !== null && overrideVal !== "";
+
+      // Overridden elements marked with *
+      const prefix = isOverridden ? "*" : " ";
+      const labelText = isSelected
+        ? this.theme.fg("accent", `${prefix}${label}`.padEnd(19))
+        : this.theme.fg("text", `${prefix}${label}`.padEnd(19));
+
+      const valueText = isOverridden
+        ? this.theme.fg(isSelected ? "accent" : "text", overrideVal!)
+        : this.theme.fg("dim", "(inherit)");
+
+      lines.push(`  ${cursor} ${swatch} ${labelText} ${valueText}`);
+    }
+
+    if (this.colorScrollOffset + maxVisible < colorElements.length) {
+      lines.push("  " + this.theme.fg("dim", "  ↓ ..."));
+    }
+
+    lines.push("");
+    lines.push("  " + this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))));
+
+    return lines;
   }
 
   // ===========================================================================
@@ -403,7 +621,6 @@ export class SettingsMenu implements Component {
 
     const previewMode = this.getActiveTabMode();
 
-    // Use cache to avoid re-rendering on every frame
     if (this.previewCacheWidth === width && this.previewCacheMode === previewMode && this.previewCache.length > 0) {
       return this.previewCache;
     }
@@ -416,7 +633,6 @@ export class SettingsMenu implements Component {
       this.previewCacheMode = previewMode;
       return lines;
     } catch {
-      // Graceful fallback if renderWidget fails (e.g., no data)
       return [this.theme.fg("dim", "Usage: No data (preview)")];
     }
   }
@@ -425,16 +641,47 @@ export class SettingsMenu implements Component {
   // Tab content rendering
   // ===========================================================================
 
+  private renderGlobalTabContent(width: number): string[] {
+    const lines: string[] = [];
+
+    // SettingsList (mode/scope/preset)
+    const settingsLines = this.globalSettingsList.render(width);
+    for (const line of settingsLines) {
+      lines.push("  " + line);
+    }
+
+    // Global Colors section
+    lines.push(...this.renderGlobalColorsSection(width));
+
+    return lines;
+  }
+
+  private renderModeTabContent(mode: DisplayMode, width: number): string[] {
+    const lines: string[] = [];
+
+    // SettingsList (column toggles)
+    const tabIndex = DISPLAY_MODES.indexOf(mode);
+    const list = this.modeSettingsLists[tabIndex];
+    if (list) {
+      const settingsLines = list.render(width);
+      for (const line of settingsLines) {
+        lines.push("  " + line);
+      }
+    }
+
+    // Color Overrides section
+    lines.push(...this.renderModeColorSection(mode, width));
+
+    return lines;
+  }
+
   private renderTabContent(width: number): string[] {
     if (this.activeTab >= 0 && this.activeTab <= 3) {
-      // Mode tabs — render the corresponding SettingsList
-      const list = this.modeSettingsLists[this.activeTab];
-      if (list) return list.render(width);
-      return [this.theme.fg("dim", `No settings for ${TAB_NAMES[this.activeTab]} tab`)];
+      const mode = TAB_MODE[this.activeTab];
+      return this.renderModeTabContent(mode, width);
     }
     if (this.activeTab === 4) {
-      // Global tab
-      return this.globalSettingsList.render(width);
+      return this.renderGlobalTabContent(width);
     }
     return [];
   }
@@ -445,7 +692,6 @@ export class SettingsMenu implements Component {
 
   private renderTabBar(width: number): string[] {
     if (width < 20) {
-      // Too narrow for tab bar — just show active tab name
       return [this.theme.fg("accent", `  ${TAB_NAMES[this.activeTab]}  `)];
     }
 
@@ -459,7 +705,6 @@ export class SettingsMenu implements Component {
         ? name.slice(0, tabWidth - 4) + "…"
         : name;
 
-      // Center the name within the tab width
       const padding = Math.max(0, tabWidth - displayName.length - 2);
       const leftPad = Math.floor(padding / 2);
       const rightPad = Math.ceil(padding / 2);
@@ -478,7 +723,7 @@ export class SettingsMenu implements Component {
   }
 
   private renderHintBar(width: number): string[] {
-    const hints = "← → switch tabs  ↑↓ select  Enter change  Esc/q close";
+    const hints = "← → tabs  ↑↓ select  Enter edit  c=colors  Esc/q close";
     if (width < hints.length + 2) return [];
     const leftPad = Math.floor((width - hints.length) / 2);
     return [this.theme.fg("dim", " ".repeat(leftPad) + hints)];
@@ -489,7 +734,25 @@ export class SettingsMenu implements Component {
   // ===========================================================================
 
   render(width: number): string[] {
-    const safeWidth = Math.max(width, 20);
+    const safeWidth = Math.max(width, 40);
+
+    // If color picker is active, render it instead of normal content
+    if (this.colorPicker) {
+      const elementName = this.editingElement
+        ? ELEMENT_LABELS[this.editingElement] ?? this.editingElement
+        : "Unknown";
+      const context = this.editingMode
+        ? `${elementName} (${this.editingMode} mode)`
+        : `${elementName} (global)`;
+
+      const pickerLines = this.colorPicker.render(safeWidth);
+      return [
+        this.theme.fg("dim", `Editing: ${context}`),
+        "",
+        ...pickerLines,
+      ];
+    }
+
     const lines: string[] = [];
 
     // Top border
@@ -520,7 +783,7 @@ export class SettingsMenu implements Component {
     // Tab content
     const contentLines = this.renderTabContent(safeWidth);
     for (const line of contentLines) {
-      lines.push("  " + line);
+      lines.push(line);
     }
 
     // Footer
@@ -537,6 +800,13 @@ export class SettingsMenu implements Component {
   // ===========================================================================
 
   handleInput(input: string): void {
+    // If color picker is active, delegate to it
+    if (this.colorPicker) {
+      this.colorPicker.handleInput(input);
+      this.tui.requestRender();
+      return;
+    }
+
     // Escape / q — close menu
     if (input === "\x1b" || input === "q") {
       this.done();
@@ -545,21 +815,37 @@ export class SettingsMenu implements Component {
 
     // Tab switching via left/right arrows
     if (input === "\x1b[C" || input === "\x1bOC") {
-      // Right arrow
       this.activeTab = ((this.activeTab + 1) % TAB_NAMES.length) as TabIndex;
+      this.focusSection = "settings";
       this.invalidatePreview();
       this.tui.requestRender();
       return;
     }
     if (input === "\x1b[D" || input === "\x1bOD") {
-      // Left arrow
       this.activeTab = ((this.activeTab - 1 + TAB_NAMES.length) % TAB_NAMES.length) as TabIndex;
+      this.focusSection = "settings";
       this.invalidatePreview();
       this.tui.requestRender();
       return;
     }
 
-    // Tab content input — delegate to appropriate SettingsList
+    // 'c' key — toggle between settings and colors section
+    if (input === "c") {
+      this.focusSection = this.focusSection === "settings" ? "colors" : "settings";
+      this.tui.requestRender();
+      return;
+    }
+
+    // Handle input based on which section is focused
+    if (this.focusSection === "settings") {
+      this.handleSettingsInput(input);
+    } else {
+      this.handleColorSectionInput(input);
+    }
+  }
+
+  /** Delegate input to the active SettingsList. */
+  private handleSettingsInput(input: string): void {
     if (this.activeTab >= 0 && this.activeTab <= 3) {
       const list = this.modeSettingsLists[this.activeTab];
       if (list) list.handleInput(input);
@@ -568,11 +854,84 @@ export class SettingsMenu implements Component {
     }
   }
 
+  /** Handle navigation within the color elements section. */
+  private handleColorSectionInput(input: string): void {
+    // Up arrow
+    if (input === "\x1b[A" || input === "\x1bOA") {
+      if (this.colorElementIndex > 0) {
+        this.colorElementIndex--;
+        this.tui.requestRender();
+      }
+      return;
+    }
+
+    // Down arrow
+    if (input === "\x1b[B" || input === "\x1bOB") {
+      if (this.colorElementIndex < colorElements.length - 1) {
+        this.colorElementIndex++;
+        this.tui.requestRender();
+      }
+      return;
+    }
+
+    // Home
+    if (input === "\x1b[H" || input === "\x1bOH") {
+      this.colorElementIndex = 0;
+      this.colorScrollOffset = 0;
+      this.tui.requestRender();
+      return;
+    }
+
+    // End
+    if (input === "\x1b[F" || input === "\x1bOF") {
+      this.colorElementIndex = colorElements.length - 1;
+      this.tui.requestRender();
+      return;
+    }
+
+    // Enter — open color picker for selected element
+    if (input === "\r" || input === "\n") {
+      const element = colorElements[this.colorElementIndex];
+      if (element) {
+        // Determine mode context
+        if (this.activeTab === 4) {
+          // Global tab — editing global overrides
+          this.openColorPicker(element, null);
+        } else if (this.activeTab >= 0 && this.activeTab <= 3) {
+          // Mode tab — editing per-mode overrides
+          const mode = TAB_MODE[this.activeTab];
+          this.openColorPicker(element, mode);
+        }
+      }
+      return;
+    }
+
+    // Delete / Backspace — reset override to null (inherit)
+    if (input === "\x7f" || input === "\b" || input === "d") {
+      const element = colorElements[this.colorElementIndex];
+      if (element) {
+        if (this.activeTab === 4) {
+          this.config.globalColorOverrides[element] = null;
+        } else if (this.activeTab >= 0 && this.activeTab <= 3) {
+          const mode = TAB_MODE[this.activeTab];
+          this.config.perModeColorOverrides[mode][element] = null;
+        }
+        saveConfig(this.config);
+        this.invalidatePreview();
+        this.tui.requestRender();
+      }
+      return;
+    }
+  }
+
   // ===========================================================================
   // Dispose
   // ===========================================================================
 
   dispose(): void {
-    // Nothing to clean up
+    if (this.colorPicker) {
+      this.colorPicker.dispose();
+      this.colorPicker = null;
+    }
   }
 }
