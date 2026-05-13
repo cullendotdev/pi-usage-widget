@@ -1636,6 +1636,25 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Register keyboard shortcuts
+	pi.registerShortcut("ctrl+u", {
+		description: "Cycle usage widget display mode",
+		handler: async () => {
+			if (currentWidget) {
+				currentWidget.cycleMode();
+			}
+		},
+	});
+
+	pi.registerShortcut("alt+u", {
+		description: "Cycle usage widget time scope",
+		handler: async () => {
+			if (currentWidget) {
+				currentWidget.cycleScope();
+			}
+		},
+	});
+
+	// Also register /commands for discoverability
 	pi.registerCommand("cycle-usage-mode", {
 		description: "Cycle usage widget display mode",
 		shortcuts: ["ctrl+u"],
@@ -1648,7 +1667,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerCommand("cycle-usage-scope", {
 		description: "Cycle usage widget time scope",
-		shortcuts: ["ctrl+shift+u"],
+		shortcuts: ["alt+u"],
 		handler: async () => {
 			if (currentWidget) {
 				currentWidget.cycleScope();
