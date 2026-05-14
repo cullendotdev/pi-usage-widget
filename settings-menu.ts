@@ -137,21 +137,165 @@ type FocusSection = "settings" | "colors";
  * The preview shows structure, not real data — it's a UI preview, not a data dashboard.
  */
 export function createMockUsageData(): UsageData {
-  const emptyStats = (): UsageData[keyof UsageData] => ({
-    providers: new Map(),
-    totals: { messages: 0, cost: 0, tokens: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, sessions: 0 },
-    insights: { insights: [] },
+  return {
+    lastHour: buildScopeStats(0.08),
+    today: buildScopeStats(1.0),
+    yesterday: buildScopeStats(0.85),
+    thisWeek: buildScopeStats(4.2),
+    lastWeek: buildScopeStats(3.8),
+    thisMonth: buildScopeStats(18.0),
+    allTime: buildScopeStats(38.0),
+  };
+}
+
+// =============================================================================
+// Mock data builder — produces realistic preview data for live preview
+// =============================================================================
+
+/**
+ * Build a single time scope's stats scaled by the given factor.
+ * Base data (scale=1.0) represents one day of heavy usage across 3 providers.
+ */
+function buildScopeStats(scale: number): TimeFilteredStats {
+  const r = (n: number): number => Math.max(0, Math.round(n * scale));
+  const sessionsFor = (ids: string[]): Set<string> => new Set(ids);
+
+  // ---- Per-model stats (scale=1.0 values) ----
+
+  // google — Gemini models
+  const gemini25ProSessions = sessionsFor(["s1", "s3"]);
+  const gemini25FlashSessions = sessionsFor(["s2", "s3"]);
+
+  const gemini25Pro = (): ModelStats => ({
+    messages: r(52),
+    cost: 3.8 * scale,
+    tokens: { total: r(390000), input: r(285000), output: r(102000), cacheRead: r(2500), cacheWrite: r(500) },
+    sessions: new Set([...gemini25ProSessions].slice(0, Math.max(1, r(2)))),
   });
 
-  return {
-    lastHour: emptyStats(),
-    today: emptyStats(),
-    yesterday: emptyStats(),
-    thisWeek: emptyStats(),
-    lastWeek: emptyStats(),
-    thisMonth: emptyStats(),
-    allTime: emptyStats(),
+  const gemini25Flash = (): ModelStats => ({
+    messages: r(35),
+    cost: 1.434 * scale,
+    tokens: { total: r(130000), input: r(95000), output: r(33000), cacheRead: r(1500), cacheWrite: r(500) },
+    sessions: new Set([...gemini25FlashSessions].slice(0, Math.max(1, r(2)))),
+  });
+
+  // anthropic — Claude models
+  const claudeSonnetSessions = sessionsFor(["s4", "s5"]);
+  const claudeHaikuSessions = sessionsFor(["s5", "s6"]);
+
+  const claudeSonnet = (): ModelStats => ({
+    messages: r(68),
+    cost: 3.85 * scale,
+    tokens: { total: r(445000), input: r(318000), output: r(124000), cacheRead: r(2200), cacheWrite: r(800) },
+    sessions: new Set([...claudeSonnetSessions].slice(0, Math.max(1, r(2)))),
+  });
+
+  const claudeHaiku = (): ModelStats => ({
+    messages: r(44),
+    cost: 1.397 * scale,
+    tokens: { total: r(167000), input: r(125000), output: r(39500), cacheRead: r(1600), cacheWrite: r(900) },
+    sessions: new Set([...claudeHaikuSessions].slice(0, Math.max(1, r(2)))),
+  });
+
+  // openai — GPT models
+  const gpt4oSessions = sessionsFor(["s7", "s8"]);
+  const gpt41MiniSessions = sessionsFor(["s7"]);
+  const o4MiniSessions = sessionsFor(["s8"]);
+
+  const gpt4o = (): ModelStats => ({
+    messages: r(72),
+    cost: 2.5 * scale,
+    tokens: { total: r(210000), input: r(148000), output: r(57000), cacheRead: r(3800), cacheWrite: r(1200) },
+    sessions: new Set([...gpt4oSessions].slice(0, Math.max(1, r(2)))),
+  });
+
+  const gpt41Mini = (): ModelStats => ({
+    messages: r(38),
+    cost: 0.325 * scale,
+    tokens: { total: r(58000), input: r(42000), output: r(15000), cacheRead: r(800), cacheWrite: r(200) },
+    sessions: new Set([...gpt41MiniSessions].slice(0, Math.max(1, r(1)))),
+  });
+
+  const o4Mini = (): ModelStats => ({
+    messages: r(33),
+    cost: 0.192 * scale,
+    tokens: { total: r(53500), input: r(31000), output: r(21800), cacheRead: r(400), cacheWrite: r(300) },
+    sessions: new Set([...o4MiniSessions].slice(0, Math.max(1, r(1)))),
+  });
+
+  // ---- Models map ----
+  const googleModels = new Map<string, ModelStats>();
+  googleModels.set("gemini-2.5-pro", gemini25Pro());
+  googleModels.set("gemini-2.5-flash", gemini25Flash());
+
+  const anthropicModels = new Map<string, ModelStats>();
+  anthropicModels.set("claude-sonnet-4-20250514", claudeSonnet());
+  anthropicModels.set("claude-haiku-3.5", claudeHaiku());
+
+  const openaiModels = new Map<string, ModelStats>();
+  openaiModels.set("gpt-4o", gpt4o());
+  openaiModels.set("gpt-4.1-mini", gpt41Mini());
+  openaiModels.set("o4-mini", o4Mini());
+
+  // ---- Aggregate totals per provider ----
+  function aggregateProvider(models: Map<string, ModelStats>, sessionIds: string[]): { stats: Omit<ProviderStats, "models">; sessions: Set<string> } {
+    let messages = 0;
+    let cost = 0;
+    const tokens = { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    const allSessions = new Set<string>();
+
+    for (const m of models.values()) {
+      messages += m.messages;
+      cost += m.cost;
+      tokens.total += m.tokens.total;
+      tokens.input += m.tokens.input;
+      tokens.output += m.tokens.output;
+      tokens.cacheRead += m.tokens.cacheRead;
+      tokens.cacheWrite += m.tokens.cacheWrite;
+      for (const s of m.sessions) allSessions.add(s);
+    }
+
+    // Ensure at least the expected sessions exist (for small scales)
+    for (const id of sessionIds) allSessions.add(id);
+
+    return { stats: { messages, cost: Math.round(cost * 1000) / 1000, tokens, sessions: allSessions }, sessions: allSessions };
+  }
+
+  const googleAgg = aggregateProvider(googleModels, ["s1", "s2", "s3"]);
+  const anthropicAgg = aggregateProvider(anthropicModels, ["s4", "s5", "s6"]);
+  const openaiAgg = aggregateProvider(openaiModels, ["s7", "s8"]);
+
+  // ---- Providers map ----
+  const providers = new Map<string, ProviderStats>();
+  providers.set("google", { ...googleAgg.stats, models: googleModels });
+  providers.set("anthropic", { ...anthropicAgg.stats, models: anthropicModels });
+  providers.set("openai", { ...openaiAgg.stats, models: openaiModels });
+
+  // ---- Global totals ----
+  const allSessions = new Set([
+    ...googleAgg.sessions,
+    ...anthropicAgg.sessions,
+    ...openaiAgg.sessions,
+  ]);
+
+  const totals: TotalStats = {
+    messages: googleAgg.stats.messages + anthropicAgg.stats.messages + openaiAgg.stats.messages,
+    cost: Math.round((googleAgg.stats.cost + anthropicAgg.stats.cost + openaiAgg.stats.cost) * 1000) / 1000,
+    tokens: {
+      total: googleAgg.stats.tokens.total + anthropicAgg.stats.tokens.total + openaiAgg.stats.tokens.total,
+      input: googleAgg.stats.tokens.input + anthropicAgg.stats.tokens.input + openaiAgg.stats.tokens.input,
+      output: googleAgg.stats.tokens.output + anthropicAgg.stats.tokens.output + openaiAgg.stats.tokens.output,
+      cacheRead: googleAgg.stats.tokens.cacheRead + anthropicAgg.stats.tokens.cacheRead + openaiAgg.stats.tokens.cacheRead,
+      cacheWrite: googleAgg.stats.tokens.cacheWrite + anthropicAgg.stats.tokens.cacheWrite + openaiAgg.stats.tokens.cacheWrite,
+    },
+    sessions: allSessions.size,
   };
+
+  // ---- Insights (empty for mock preview) ----
+  const insights: PeriodInsights = { insights: [] };
+
+  return { providers, totals, insights };
 }
 
 // =============================================================================

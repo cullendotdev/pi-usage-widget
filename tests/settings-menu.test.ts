@@ -45,26 +45,53 @@ describe("createMockUsageData", () => {
     }
   });
 
-  it("totals start at zero", async () => {
+  it("default today scope has non-zero totals and tokens", async () => {
     const { createMockUsageData } = await import("../settings-menu.js");
     const data = createMockUsageData();
 
-    for (const scope of Object.keys(data) as Array<keyof typeof data>) {
-      assert.equal(data[scope].totals.messages, 0);
-      assert.equal(data[scope].totals.cost, 0);
-      assert.equal(data[scope].totals.tokens.total, 0);
-      assert.equal(data[scope].totals.tokens.input, 0);
-      assert.equal(data[scope].totals.tokens.output, 0);
-    }
+    const today = data.today;
+    assert.ok(today.totals.messages > 0, "today should have messages");
+    assert.ok(today.totals.cost > 0, "today should have cost");
+    assert.ok(today.totals.tokens.total > 0, "today should have tokens");
+    assert.ok(today.totals.tokens.input > 0, "today should have input tokens");
+    assert.ok(today.totals.tokens.output > 0, "today should have output tokens");
+    assert.ok(today.totals.sessions > 0, "today should have sessions");
   });
 
-  it("providers Map is empty for mock data", async () => {
+  it("providers Map has 3 providers for today scope", async () => {
     const { createMockUsageData } = await import("../settings-menu.js");
     const data = createMockUsageData();
 
-    for (const scope of Object.keys(data) as Array<keyof typeof data>) {
-      assert.equal(data[scope].providers.size, 0);
-    }
+    const today = data.today;
+    assert.equal(today.providers.size, 3, "today should have 3 providers");
+    assert.ok(today.providers.has("google"), "should have google");
+    assert.ok(today.providers.has("anthropic"), "should have anthropic");
+    assert.ok(today.providers.has("openai"), "should have openai");
+  });
+
+  it("each provider has models", async () => {
+    const { createMockUsageData } = await import("../settings-menu.js");
+    const data = createMockUsageData();
+
+    const today = data.today;
+    assert.ok(today.providers.get("google")!.models.size >= 2, "google should have >= 2 models");
+    assert.ok(today.providers.get("anthropic")!.models.size >= 2, "anthropic should have >= 2 models");
+    assert.ok(today.providers.get("openai")!.models.size >= 2, "openai should have >= 2 models");
+  });
+
+  it("scopes have different totals (scope variety)", async () => {
+    const { createMockUsageData } = await import("../settings-menu.js");
+    const data = createMockUsageData();
+
+    // lastHour should be smallest, allTime largest
+    assert.ok(
+      data.lastHour.totals.messages < data.today.totals.messages,
+      "lastHour should have fewer messages than today"
+    );
+    assert.ok(
+      data.today.totals.messages < data.allTime.totals.messages,
+      "today should have fewer messages than allTime"
+    );
   });
 
   it("creates independent objects on each call", async () => {
