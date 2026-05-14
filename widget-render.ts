@@ -28,6 +28,7 @@ import {
   formatNumber,
   formatScopeLabel,
 } from "./formatting.js";
+import { resolveColor, type ColorElement } from "./color-engine.js";
 
 // =============================================================================
 // Column system
@@ -37,6 +38,10 @@ interface DataColumn {
   label: string;
   width: number;
   dimmed?: boolean;
+  /** Color element for the column header label. */
+  headerElement?: ColorElement;
+  /** Color element for the column value in data rows. */
+  valueElement?: ColorElement;
   getValue: (s: BaseStats & { sessions: Set<string> | number }) => string;
 }
 
@@ -62,24 +67,32 @@ interface TableLayout {
 const SESSIONS_COLUMN: DataColumn = {
   label: "Sessions",
   width: 8,
+  headerElement: "sessionsHeader",
+  valueElement: "sessionsValue",
   getValue: (s) => formatNumber(typeof s.sessions === "number" ? s.sessions : s.sessions.size),
 };
 
 const MSGS_COLUMN: DataColumn = {
   label: "Msgs",
   width: 7,
+  headerElement: "msgsHeader",
+  valueElement: "msgsValue",
   getValue: (s) => formatNumber(s.messages),
 };
 
 const COST_COLUMN: DataColumn = {
   label: "Cost",
   width: 9,
+  headerElement: "costHeader",
+  valueElement: "costValue",
   getValue: (s) => formatCost(s.cost),
 };
 
 const TOKENS_COLUMN: DataColumn = {
   label: "Tokens",
   width: 9,
+  headerElement: "tokensHeader",
+  valueElement: "tokensValue",
   getValue: (s) => formatTokens(s.tokens.total),
 };
 
@@ -87,6 +100,8 @@ const INPUT_COLUMN: DataColumn = {
   label: "\u2191In",
   width: 8,
   dimmed: true,
+  headerElement: "tokensInHeader",
+  valueElement: "tokensInValue",
   getValue: (s) => formatTokens(s.tokens.input + s.tokens.cacheWrite),
 };
 
@@ -94,6 +109,8 @@ const OUTPUT_COLUMN: DataColumn = {
   label: "\u2193Out",
   width: 8,
   dimmed: true,
+  headerElement: "tokensOutHeader",
+  valueElement: "tokensOutValue",
   getValue: (s) => formatTokens(s.tokens.output),
 };
 
@@ -101,6 +118,8 @@ const CACHE_COLUMN: DataColumn = {
   label: "Cache",
   width: 8,
   dimmed: true,
+  headerElement: "cacheHeader",
+  valueElement: "cacheValue",
   getValue: (s) => formatTokens(s.tokens.cacheRead + s.tokens.cacheWrite),
 };
 
@@ -108,6 +127,8 @@ const CACHE_COLUMN: DataColumn = {
 const WIDGET_COST_COLUMN: DataColumn = {
   label: "Cost",
   width: 9,
+  headerElement: "costHeader",
+  valueElement: "costValue",
   getValue: (s) => formatCostFixed3(s.cost),
 };
 
@@ -213,6 +234,27 @@ function clampLines(lines: string[], width: number): string[] {
   return lines.map((line) => truncateToWidth(line, Math.max(width, 0)));
 }
 
+// =============================================================================
+// Color engine integration
+// =============================================================================
+
+/**
+ * Wrap text in a resolved ANSI foreground color escape + reset.
+ * Returns text unchanged if ansi is empty.
+ */
+function wrap(ansi: string, text: string): string {
+  if (!ansi) return text;
+  return `${ansi}${text}\x1b[0m`;
+}
+
+/**
+ * Resolve a color element to its ANSI code and wrap the given text.
+ * Shortcut for wrap(resolveColor(element, config), text).
+ */
+function colorFg(config: UsageWidgetConfig, element: ColorElement, text: string): string {
+  return wrap(resolveColor(element, config), text);
+}
+
 function pickFittingText(width: number, variants: string[]): string {
   for (const variant of variants) {
     if (visibleWidth(variant) <= width) return variant;
@@ -302,7 +344,7 @@ function renderSeparatorLine(
 
   const char = lineCfg.character || "\u2500"; // ─ default
   const line = char.repeat(Math.max(tableWidth, 0));
-  return theme.fg("border", line);
+  return colorFg(config, lineConfig, line);
 }
 
 // =============================================================================
@@ -315,6 +357,7 @@ function renderDataRow(
   stats: BaseStats & { sessions: Set<string> | number },
   layout: TableLayout,
   options: { indent?: number; dimAll?: boolean; prefix?: string } = {},
+  config: UsageWidgetConfig,
 ): string {
   const { indent = 0, dimAll = false, prefix } = options;
 
@@ -323,14 +366,15 @@ function renderDataRow(
   const prefixWidth = visibleWidth(safePrefix);
   const innerNameWidth = Math.max(layout.nameWidth - prefixWidth, 0);
   const truncName = innerNameWidth > 0 ? truncateToWidth(name, innerNameWidth) : "";
-  const styledName = dimAll ? theme.fg("dim", truncName) : truncName;
+  const nameElement: ColorElement = dimAll ? "modelValue" : "providerValue";
+  const styledName = innerNameWidth > 0 ? padRight(colorFg(config, nameElement, truncName), innerNameWidth) : "";
 
-  let row = safePrefix + (innerNameWidth > 0 ? padRight(styledName, innerNameWidth) : "");
+  let row = safePrefix + styledName;
 
   for (const col of layout.columns) {
     const value = fitCell(col.getValue(stats), col.width, "right");
-    const shouldDim = col.dimmed || dimAll;
-    row += shouldDim ? theme.fg("dim", value) : value;
+    const elem = col.valueElement;
+    row += elem ? colorFg(config, elem, value) : (dimAll ? colorFg(config, "modelValue", value) : value);
   }
 
   return row;
@@ -346,26 +390,27 @@ function renderDualNameRow(
   stats: BaseStats & { sessions: Set<string> | number },
   layout: TableLayout,
   options: { dimAll?: boolean } = {},
+  config: UsageWidgetConfig,
 ): string {
   const { dimAll = false } = options;
 
   // First column: provider
   const provTrunc = layout.nameWidth > 0 ? truncateToWidth(providerName, layout.nameWidth) : "";
-  const provStyled = dimAll ? theme.fg("dim", provTrunc) : provTrunc;
+  const provStyled = colorFg(config, "providerValue", provTrunc);
   const provCell = layout.nameWidth > 0 ? padRight(provStyled, layout.nameWidth) : "";
 
   // Second column: model
   const name2Width = layout.nameWidth2 ?? layout.nameWidth;
   const modelTrunc = name2Width > 0 ? truncateToWidth(modelName, name2Width) : "";
-  const modelStyled = dimAll ? theme.fg("dim", modelTrunc) : modelTrunc;
+  const modelStyled = dimAll ? colorFg(config, "modelValue", modelTrunc) : colorFg(config, "modelValue", modelTrunc);
   const modelCell = name2Width > 0 ? padRight(modelStyled, name2Width) : "";
 
   let row = provCell + modelCell;
 
   for (const col of layout.columns) {
     const value = fitCell(col.getValue(stats), col.width, "right");
-    const shouldDim = col.dimmed || dimAll;
-    row += shouldDim ? theme.fg("dim", value) : value;
+    const elem = col.valueElement;
+    row += elem ? colorFg(config, elem, value) : (dimAll ? colorFg(config, "modelValue", value) : value);
   }
 
   return row;
@@ -379,6 +424,7 @@ function renderTableHeader(
   theme: Theme,
   layout: TableLayout,
   providerColLabel: string,
+  config: UsageWidgetConfig,
   modelColLabel?: string,
 ): string[] {
   const lines: string[] = [];
@@ -387,18 +433,19 @@ function renderTableHeader(
     // Dual name columns
     const provHdr = fitCell(providerColLabel, layout.nameWidth);
     const modelHdr = fitCell(modelColLabel, layout.nameWidth2 ?? layout.nameWidth);
-    let headerLine = provHdr + modelHdr;
-    for (const col of layout.columns) {
-      headerLine += fitCell(col.label, col.width, "right");
-    }
-    lines.push(theme.fg("muted", headerLine));
-  } else {
-    let headerLine = fitCell(providerColLabel, layout.nameWidth);
+    let headerLine = colorFg(config, "providerHeader", provHdr) + colorFg(config, "modelHeader", modelHdr);
     for (const col of layout.columns) {
       const label = fitCell(col.label, col.width, "right");
-      headerLine += col.dimmed ? theme.fg("dim", label) : label;
+      headerLine += col.headerElement ? colorFg(config, col.headerElement, label) : label;
     }
-    lines.push(theme.fg("muted", headerLine));
+    lines.push(headerLine);
+  } else {
+    let headerLine = colorFg(config, "providerHeader", fitCell(providerColLabel, layout.nameWidth));
+    for (const col of layout.columns) {
+      const label = fitCell(col.label, col.width, "right");
+      headerLine += col.headerElement ? colorFg(config, col.headerElement, label) : label;
+    }
+    lines.push(headerLine);
   }
 
   return lines;
@@ -413,6 +460,7 @@ function renderTotalsRow(
   totals: TotalStats,
   layout: TableLayout,
   columnConfig: ModeColumnConfig,
+  config: UsageWidgetConfig,
 ): string[] {
   const lines: string[] = [];
   const hasDualNames = layout.nameWidth2 !== undefined;
@@ -420,17 +468,19 @@ function renderTotalsRow(
   if (hasDualNames) {
     // Merge provider+model name cells into one spanned "Total" cell
     const totalNameWidth = layout.nameWidth + (layout.nameWidth2 ?? 0);
-    let totalRow = fitCell(theme.bold("Total"), totalNameWidth);
+    let totalRow = fitCell(colorFg(config, "title", theme.bold("Total")), totalNameWidth);
     for (const col of layout.columns) {
       const value = fitCell(col.getValue(totals), col.width, "right");
-      totalRow += col.dimmed ? theme.fg("dim", value) : value;
+      const elem = col.valueElement ?? "title";
+      totalRow += colorFg(config, elem, value);
     }
     lines.push(totalRow);
   } else {
-    let totalRow = fitCell(theme.bold("Total"), layout.nameWidth);
+    let totalRow = fitCell(colorFg(config, "title", theme.bold("Total")), layout.nameWidth);
     for (const col of layout.columns) {
       const value = fitCell(col.getValue(totals), col.width, "right");
-      totalRow += col.dimmed ? theme.fg("dim", value) : value;
+      const elem = col.valueElement ?? "title";
+      totalRow += colorFg(config, elem, value);
     }
     lines.push(totalRow);
   }
@@ -442,14 +492,14 @@ function renderTotalsRow(
 // Formula note
 // =============================================================================
 
-function renderFormulaNote(theme: Theme, width: number): string[] {
+function renderFormulaNote(theme: Theme, config: UsageWidgetConfig, width: number): string[] {
   const line = pickFittingText(width, [
     "Tokens = Input + Output + CacheWrite  \u00b7  \u2191In = Input + CacheWrite  (as of 0.2.0)",
     "Tokens = In + Out + CacheWrite  \u00b7  \u2191In = In + CacheWrite  (v0.2.0+)",
     "Tokens & \u2191In include CacheWrite (v0.2.0+)",
     "Incl. CacheWrite (v0.2.0+)",
   ]);
-  return [theme.fg("dim", line), ""];
+  return [colorFg(config, "scope", line), ""];
 }
 
 // =============================================================================
@@ -462,12 +512,13 @@ function renderSummary(
   data: TimeFilteredStats,
   scope: TimeScope,
   _width: number,
+  config: UsageWidgetConfig,
 ): string[] {
   const totals = data.totals;
 
   if (totals.messages === 0) {
     const label = formatScopeLabel(scope);
-    return [theme.fg("dim", `Usage: --- (${label})`)];
+    return [colorFg(config, "title", `Usage: --- (${label})`)];
   }
 
   const parts: string[] = [];
@@ -498,9 +549,9 @@ function renderSummary(
   const scopeLabel = formatScopeLabel(scope);
 
   return [
-    theme.fg("muted", "Usage: ") +
-    theme.fg("text", joined) +
-    (joined ? theme.fg("muted", ` (${scopeLabel})`) : theme.fg("muted", `(${scopeLabel})`)),
+    colorFg(config, "title", "Usage: ") +
+    colorFg(config, "title", joined) +
+    (joined ? colorFg(config, "scope", ` (${scopeLabel})`) : colorFg(config, "scope", `(${scopeLabel})`)),
   ];
 }
 
@@ -517,13 +568,13 @@ function renderCompact(
   config: UsageWidgetConfig,
 ): string[] {
   if (data.totals.messages === 0) {
-    return [theme.fg("dim", `Usage: --- (${formatScopeLabel(scope)})`)];
+    return [colorFg(config, "title", `Usage: --- (${formatScopeLabel(scope)})`)];
   }
 
   const lines: string[] = [];
 
   // Title
-  lines.push(theme.fg("muted", `Usage: (${formatScopeLabel(scope)})`));
+  lines.push(colorFg(config, "title", `Usage: (${formatScopeLabel(scope)})`));
 
   // Filter columns by config
   const columns = filterDataColumns(FULL_DATA_COLUMNS, columnConfig);
@@ -533,7 +584,7 @@ function renderCompact(
     const providers = Array.from(data.providers.entries())
       .sort((a, b) => b[1].cost - a[1].cost);
     for (const [provider] of providers) {
-      lines.push(theme.fg("muted", "  " + provider));
+      lines.push(colorFg(config, "providerValue", "  " + provider));
     }
     return lines;
   }
@@ -543,7 +594,7 @@ function renderCompact(
   const layout = selectTableLayout(candidates, width, false);
 
   // Header
-  lines.push(...renderTableHeader(theme, layout, "Provider / Model"));
+  lines.push(...renderTableHeader(theme, layout, "Provider / Model", config));
 
   // Header separator
   const headerSep = renderSeparatorLine(theme, config, "headerLine", layout.tableWidth);
@@ -554,11 +605,11 @@ function renderCompact(
     .sort((a, b) => b[1].cost - a[1].cost);
 
   if (providers.length === 0) {
-    lines.push(theme.fg("dim", "  No usage data for this period"));
+    lines.push(colorFg(config, "title", "  No usage data for this period"));
   } else {
     for (const [providerName, providerStats] of providers) {
-      const prefix = theme.fg("dim", "\u25b8 ");
-      lines.push(renderDataRow(theme, providerName, providerStats, layout, { prefix }));
+      const prefix = colorFg(config, "providerValue", "\u25b8 ");
+      lines.push(renderDataRow(theme, providerName, providerStats, layout, { prefix }, config));
     }
   }
 
@@ -568,11 +619,11 @@ function renderCompact(
 
   // Totals
   if (columnConfig.showTotals) {
-    lines.push(...renderTotalsRow(theme, data.totals, layout, columnConfig));
+    lines.push(...renderTotalsRow(theme, data.totals, layout, columnConfig, config));
   }
 
   // Formula note
-  lines.push(...renderFormulaNote(theme, width));
+  lines.push(...renderFormulaNote(theme, config, width));
 
   return lines;
 }
@@ -590,13 +641,13 @@ function renderPerModel(
   config: UsageWidgetConfig,
 ): string[] {
   if (data.totals.messages === 0) {
-    return [theme.fg("dim", `Usage: --- (${formatScopeLabel(scope)})`)];
+    return [colorFg(config, "title", `Usage: --- (${formatScopeLabel(scope)})`)];
   }
 
   const lines: string[] = [];
 
   // Title
-  lines.push(theme.fg("muted", `Usage: (${formatScopeLabel(scope)})`));
+  lines.push(colorFg(config, "title", `Usage: (${formatScopeLabel(scope)})`));
 
   // Flatten all models from all providers, sorted by cost descending
   interface ModelEntry {
@@ -632,17 +683,17 @@ function renderPerModel(
     const candidates = buildLayoutCandidates(columns);
     layout = selectTableLayout(candidates, width, true);
     layout.nameWidth2 = layout.nameWidth2 ?? Math.max(4, Math.floor(layout.nameWidth * 0.6));
-    lines.push(...renderTableHeader(theme, layout, "Provider", "Model"));
+    lines.push(...renderTableHeader(theme, layout, "Provider", config, "Model"));
   } else if (showProvider && !showModel) {
     // Single provider column
     const candidates = buildLayoutCandidates(columns);
     layout = selectTableLayout(candidates, width, false);
-    lines.push(...renderTableHeader(theme, layout, "Provider"));
+    lines.push(...renderTableHeader(theme, layout, "Provider", config));
   } else if (!showProvider && showModel) {
     // Single model column
     const candidates = buildLayoutCandidates(columns);
     layout = selectTableLayout(candidates, width, false);
-    lines.push(...renderTableHeader(theme, layout, "Model"));
+    lines.push(...renderTableHeader(theme, layout, "Model", config));
   } else {
     // No name columns — just data
     const candidates = buildLayoutCandidates(columns);
@@ -655,21 +706,22 @@ function renderPerModel(
   if (headerSep !== null) lines.push(headerSep);
 
   if (models.length === 0) {
-    lines.push(theme.fg("dim", "  No usage data for this period"));
+    lines.push(colorFg(config, "title", "  No usage data for this period"));
   } else {
     for (const entry of models) {
       if (showProvider && showModel) {
-        lines.push(renderDualNameRow(theme, entry.provider, entry.model, entry.stats, layout));
+        lines.push(renderDualNameRow(theme, entry.provider, entry.model, entry.stats, layout, {}, config));
       } else if (showProvider && !showModel) {
-        lines.push(renderDataRow(theme, entry.provider, entry.stats, layout));
+        lines.push(renderDataRow(theme, entry.provider, entry.stats, layout, {}, config));
       } else if (!showProvider && showModel) {
-        lines.push(renderDataRow(theme, entry.model, entry.stats, layout));
+        lines.push(renderDataRow(theme, entry.model, entry.stats, layout, {}, config));
       } else {
         // No name columns — just data columns
         let row = "";
         for (const col of layout.columns) {
           const value = fitCell(col.getValue(entry.stats), col.width, "right");
-          row += col.dimmed ? theme.fg("dim", value) : value;
+          const elem = col.valueElement;
+          row += elem ? colorFg(config, elem, value) : value;
         }
         lines.push(row);
       }
@@ -692,11 +744,11 @@ function renderPerModel(
     } else if (!showProvider && showModel) {
       adjLayout.nameWidth2 = undefined;
     }
-    lines.push(...renderTotalsRow(theme, data.totals, layout, columnConfig));
+    lines.push(...renderTotalsRow(theme, data.totals, layout, columnConfig, config));
   }
 
   // Formula note
-  lines.push(...renderFormulaNote(theme, width));
+  lines.push(...renderFormulaNote(theme, config, width));
 
   return lines;
 }
@@ -714,13 +766,13 @@ function renderExpanded(
   config: UsageWidgetConfig,
 ): string[] {
   if (data.totals.messages === 0) {
-    return [theme.fg("dim", `Usage: --- (${formatScopeLabel(scope)})`)];
+    return [colorFg(config, "title", `Usage: --- (${formatScopeLabel(scope)})`)];
   }
 
   const lines: string[] = [];
 
   // Title
-  lines.push(theme.fg("muted", `Usage: (${formatScopeLabel(scope)})`));
+  lines.push(colorFg(config, "title", `Usage: (${formatScopeLabel(scope)})`));
 
   // Filter columns by config
   const columns = filterDataColumns(FULL_DATA_COLUMNS, columnConfig);
@@ -730,11 +782,11 @@ function renderExpanded(
     const providers = Array.from(data.providers.entries())
       .sort((a, b) => b[1].cost - a[1].cost);
     for (const [providerName, providerStats] of providers) {
-      lines.push(theme.fg("muted", "  \u25be ") + providerName);
+      lines.push(colorFg(config, "providerValue", "  \u25be ") + providerName);
       const providerModels = Array.from(providerStats.models.entries())
         .sort((a, b) => b[1].cost - a[1].cost);
       for (const [modelName] of providerModels) {
-        lines.push(theme.fg("dim", "      " + modelName));
+        lines.push(colorFg(config, "modelValue", "      " + modelName));
       }
     }
     return lines;
@@ -745,7 +797,7 @@ function renderExpanded(
   const layout = selectTableLayout(candidates, width, false);
 
   // Header
-  lines.push(...renderTableHeader(theme, layout, "Provider / Model"));
+  lines.push(...renderTableHeader(theme, layout, "Provider / Model", config));
 
   // Header separator
   const headerSep = renderSeparatorLine(theme, config, "headerLine", layout.tableWidth);
@@ -756,16 +808,16 @@ function renderExpanded(
     .sort((a, b) => b[1].cost - a[1].cost);
 
   if (providers.length === 0) {
-    lines.push(theme.fg("dim", "  No usage data for this period"));
+    lines.push(colorFg(config, "title", "  No usage data for this period"));
   } else {
     for (const [providerName, providerStats] of providers) {
-      const prefix = theme.fg("dim", "\u25be ");
-      lines.push(renderDataRow(theme, providerName, providerStats, layout, { prefix }));
+      const prefix = colorFg(config, "providerValue", "\u25be ");
+      lines.push(renderDataRow(theme, providerName, providerStats, layout, { prefix }, config));
 
       const providerModels = Array.from(providerStats.models.entries())
         .sort((a, b) => b[1].cost - a[1].cost);
       for (const [modelName, modelStats] of providerModels) {
-        lines.push(renderDataRow(theme, modelName, modelStats, layout, { indent: 4, dimAll: true }));
+        lines.push(renderDataRow(theme, modelName, modelStats, layout, { indent: 4, dimAll: true }, config));
       }
     }
   }
@@ -776,11 +828,11 @@ function renderExpanded(
 
   // Totals
   if (columnConfig.showTotals) {
-    lines.push(...renderTotalsRow(theme, data.totals, layout, columnConfig));
+    lines.push(...renderTotalsRow(theme, data.totals, layout, columnConfig, config));
   }
 
   // Formula note
-  lines.push(...renderFormulaNote(theme, width));
+  lines.push(...renderFormulaNote(theme, config, width));
 
   return lines;
 }
@@ -869,7 +921,7 @@ export function renderWidget(
 
   // Guard against invalid/missing scope data
   if (!scopeStats) {
-    return [theme.fg("dim", `Usage: --- (${formatScopeLabel(activeScope)})`)];
+    return [colorFg(config, "title", `Usage: --- (${formatScopeLabel(activeScope)})`)];
   }
 
   // Get column config for the active mode
@@ -879,7 +931,7 @@ export function renderWidget(
   let lines: string[];
   switch (resolvedMode) {
     case "summary":
-      lines = renderSummary(theme, columnConfig, scopeStats, activeScope, safeWidth);
+      lines = renderSummary(theme, columnConfig, scopeStats, activeScope, safeWidth, config);
       break;
 
     case "compact":
