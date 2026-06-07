@@ -56,11 +56,11 @@ function ansiToHex(ansi: string): string {
 describe("colorPresets completeness", () => {
   const presetNames = Object.keys(colorPresets) as (keyof typeof colorPresets)[];
 
-  it("has exactly 6 presets", () => {
-    assert.equal(presetNames.length, 6);
+  it("has exactly 7 presets", () => {
+    assert.equal(presetNames.length, 7);
   });
 
-  it("covers default, tokyo-night, dracula, gruvbox, nord, catppuccin", () => {
+  it("covers default, tokyo-night, dracula, gruvbox, nord, catppuccin, monokai", () => {
     assert.deepEqual(new Set(presetNames), new Set([
       "default",
       "tokyo-night",
@@ -68,6 +68,7 @@ describe("colorPresets completeness", () => {
       "gruvbox",
       "nord",
       "catppuccin",
+      "monokai",
     ]));
   });
 
@@ -293,7 +294,7 @@ describe("resolveColor — preset-only", () => {
 // =============================================================================
 
 describe("resolveColor — themed preset switching", () => {
-  for (const presetName of ["tokyo-night", "dracula", "gruvbox", "nord", "catppuccin"] as const) {
+  for (const presetName of ["tokyo-night", "dracula", "gruvbox", "nord", "catppuccin", "monokai"] as const) {
     it(`'${presetName}' preset correctly resolves title color`, () => {
       const config = makeConfig({ themedPreset: presetName } as Partial<UsageWidgetConfig>);
       const ansi = resolveColor("title", config);

@@ -279,17 +279,17 @@ describe("Global tab setting values", () => {
     assert.equal(timeScopes.length, 7);
   });
 
-  it("themed presets have exactly 6 values", () => {
+  it("themed presets have exactly 7 values", () => {
     const presets = [
       "default", "tokyo-night", "dracula",
-      "gruvbox", "nord", "catppuccin",
+      "gruvbox", "nord", "catppuccin", "monokai",
     ];
-    assert.equal(presets.length, 6);
+    assert.equal(presets.length, 7);
   });
 
   it("all presets exist in color-engine", async () => {
     const { colorPresets } = await import("../color-engine.js");
-    const presetNames = ["default", "tokyo-night", "dracula", "gruvbox", "nord", "catppuccin"];
+    const presetNames = ["default", "tokyo-night", "dracula", "gruvbox", "nord", "catppuccin", "monokai"];
     for (const name of presetNames) {
       assert.ok(colorPresets[name] !== undefined, `Missing preset: ${name}`);
     }
@@ -329,9 +329,9 @@ describe("Global tab — SettingsList items", () => {
   it("themedPreset values include all presets", () => {
     const values = [
       "Default", "Tokyo Night", "Dracula",
-      "Gruvbox", "Nord", "Catppuccin",
+      "Gruvbox", "Nord", "Catppuccin", "Monokai",
     ];
-    assert.equal(values.length, 6);
+    assert.equal(values.length, 7);
   });
 });
 
@@ -504,6 +504,16 @@ describe("Mode tab — SettingsList structural validation", () => {
   it("settings-menu module imports without errors", async () => {
     const mod = await import("../settings-menu.js");
     assert.ok(mod.SettingsMenu !== undefined);
+    assert.ok(typeof mod.HEADER_ELEMENTS !== "undefined");
+    assert.ok(typeof mod.VALUE_ELEMENTS !== "undefined");
+  });
+
+  it("mode tab navigator has 3 items: Theme Override, Columns, Colors", () => {
+    const navigatorItems = ["Theme Override", "Columns", "Colors"];
+    assert.equal(navigatorItems.length, 3);
+    assert.equal(navigatorItems[0], "Theme Override");
+    assert.equal(navigatorItems[1], "Columns");
+    assert.equal(navigatorItems[2], "Colors");
   });
 
   it("column toggle values are Show/Hide", () => {
@@ -512,29 +522,15 @@ describe("Mode tab — SettingsList structural validation", () => {
     assert.equal(toggleValues[1], "Hide");
   });
 
-  it("mode tabs have correct item counts: sum=9, others=10", () => {
-    const expectedCounts: Record<string, number> = {
-      summary: 9,
-      compact: 10,
-      "per-model": 10,
-      expanded: 10,
-    };
-    assert.equal(expectedCounts.summary, 9);
-    assert.equal(expectedCounts.compact, 10);
-    assert.equal(expectedCounts["per-model"], 10);
-    assert.equal(expectedCounts.expanded, 10);
-  });
-
-  it("mode setting IDs follow compound pattern: mode:columnId", () => {
-    const sampleIds = [
-      "summary:provider", "summary:model", "summary:cost",
-      "compact:showTotals", "per-model:cache", "expanded:tokensOut",
-    ];
-    for (const id of sampleIds) {
-      const colonIdx = id.indexOf(":");
-      assert.ok(colonIdx > 0, `${id} should contain colon`);
-      const mode = id.slice(0, colonIdx);
-      assert.ok(["summary", "compact", "per-model", "expanded"].includes(mode));
-    }
+  it("color elements are split into HEADER_ELEMENTS and VALUE_ELEMENTS", async () => {
+    const { HEADER_ELEMENTS, VALUE_ELEMENTS } = await import("../settings-menu.js");
+    assert.equal(HEADER_ELEMENTS.length, 13, "13 header elements");
+    assert.equal(VALUE_ELEMENTS.length, 9, "9 value elements");
+    // No overlap between the two lists
+    const overlap = HEADER_ELEMENTS.filter((e: string) => VALUE_ELEMENTS.includes(e));
+    assert.equal(overlap.length, 0, "HEADER_ELEMENTS and VALUE_ELEMENTS should have no overlap");
+    // Headers should NOT include value elements
+    assert.ok(!HEADER_ELEMENTS.includes("providerValue"));
+    assert.ok(!VALUE_ELEMENTS.includes("providerHeader"));
   });
 });

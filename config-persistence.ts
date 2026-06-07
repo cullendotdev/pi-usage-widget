@@ -92,10 +92,16 @@ export function getDefaultConfig(): UsageWidgetConfig {
     perModeColorOverrides[mode] = nullColorOverrides();
   }
 
+  const perModeThemedPreset = {} as Record<DisplayMode, null>;
+  for (const mode of ALL_MODES) {
+    perModeThemedPreset[mode] = null;
+  }
+
   return {
     defaultMode: "summary",
     defaultScope: "today",
     themedPreset: "default",
+    perModeThemedPreset: perModeThemedPreset as Record<DisplayMode, any>,
     globalColorOverrides: nullColorOverrides(),
     perModeColorOverrides,
     placement: {

@@ -205,7 +205,8 @@ export type ThemedPreset =
   | "dracula"
   | "gruvbox"
   | "nord"
-  | "catppuccin";
+  | "catppuccin"
+  | "monokai";
 
 /**
  * Top-level widget configuration.
@@ -218,6 +219,8 @@ export interface UsageWidgetConfig {
   defaultScope: TimeScope;
   /** Active themed preset */
   themedPreset: ThemedPreset;
+  /** Per-mode theme preset override (null = inherit from global) */
+  perModeThemedPreset: Record<DisplayMode, ThemedPreset | null>;
   /** Global color overrides (applied to all modes) */
   globalColorOverrides: ColorOverrides;
   /** Per-mode color overrides (null entries inherit from global) */

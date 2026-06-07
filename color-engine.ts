@@ -320,6 +320,37 @@ export const colorPresets: Record<ThemedPreset, ColorScheme> = {
     headerLine: "#45475a",
     footerLine: "#45475a",
   },
+
+  // ==========================================================================
+  // Monokai — dark bg with vibrant syntax-inspired accents
+  // ==========================================================================
+  monokai: {
+    title: "#ae81ff",
+    scope: "#75715e",
+    // Headers
+    providerHeader: "#a6e22e",
+    modelHeader: "#a6e22e",
+    sessionsHeader: "#75715e",
+    msgsHeader: "#75715e",
+    costHeader: "#e4db74",
+    tokensHeader: "#75715e",
+    tokensInHeader: "#49483e",
+    tokensOutHeader: "#49483e",
+    cacheHeader: "#49483e",
+    // Values
+    providerValue: "#f8f8f2",
+    modelValue: "#f8f8f2",
+    sessionsValue: "#f8f8f2",
+    msgsValue: "#f8f8f2",
+    costValue: "#e4db74",
+    tokensValue: "#f8f8f2",
+    tokensInValue: "#75715e",
+    tokensOutValue: "#75715e",
+    cacheValue: "#75715e",
+    // Lines
+    headerLine: "#66d9ef",
+    footerLine: "#66d9ef",
+  },
 };
 
 // =============================================================================
@@ -415,8 +446,10 @@ export function resolveColor(
     // Invalid override — fall through to next layer
   }
 
-  // 3. Themed preset
-  const preset = colorPresets[config.themedPreset] ?? colorPresets.default;
+  // 3. Themed preset — per-mode override first, then global
+  const perModePreset = config.perModeThemedPreset[mode];
+  const effectivePreset = perModePreset ?? config.themedPreset;
+  const preset = colorPresets[effectivePreset] ?? colorPresets.default;
   const presetHex = preset[element];
   if (presetHex) {
     const result = hexToAnsi(presetHex);
