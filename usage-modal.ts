@@ -7,9 +7,28 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { matchesKey, visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import type { BaseStats, TimeFilteredStats, UsageData, TabName, ViewMode, TimeScope } from "./types.js";
-import { formatCost, formatTokens, formatNumber, formatScopeLabel, formatThresholdTokens, formatInsightPercent } from "./formatting.js";
+import {
+  matchesKey,
+  visibleWidth,
+  truncateToWidth,
+  wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
+import type {
+  BaseStats,
+  TimeFilteredStats,
+  UsageData,
+  TabName,
+  ViewMode,
+  TimeScope,
+} from "./types.js";
+import {
+  formatCost,
+  formatTokens,
+  formatNumber,
+  formatScopeLabel,
+  formatThresholdTokens,
+  formatInsightPercent,
+} from "./formatting.js";
 
 // =============================================================================
 // Column Configuration (for interactive modal — different widths from widget)
@@ -40,7 +59,8 @@ const MAX_NAME_COL_WIDTH = 26;
 const SESSIONS_COLUMN: DataColumn = {
   label: "Sessions",
   width: 9,
-  getValue: (s) => formatNumber(typeof s.sessions === "number" ? s.sessions : s.sessions.size),
+  getValue: (s) =>
+    formatNumber(typeof s.sessions === "number" ? s.sessions : s.sessions.size),
 };
 
 const MSGS_COLUMN: DataColumn = {
@@ -94,8 +114,16 @@ const FULL_DATA_COLUMNS: DataColumn[] = [
 
 const TABLE_LAYOUTS: TableLayoutCandidate[] = [
   { columns: FULL_DATA_COLUMNS, minNameWidth: MAX_NAME_COL_WIDTH },
-  { columns: [SESSIONS_COLUMN, MSGS_COLUMN, COST_COLUMN, TOKENS_COLUMN], minNameWidth: 14, compact: true },
-  { columns: [SESSIONS_COLUMN, COST_COLUMN, TOKENS_COLUMN], minNameWidth: 12, compact: true },
+  {
+    columns: [SESSIONS_COLUMN, MSGS_COLUMN, COST_COLUMN, TOKENS_COLUMN],
+    minNameWidth: 14,
+    compact: true,
+  },
+  {
+    columns: [SESSIONS_COLUMN, COST_COLUMN, TOKENS_COLUMN],
+    minNameWidth: 12,
+    compact: true,
+  },
   { columns: [COST_COLUMN, TOKENS_COLUMN], minNameWidth: 10, compact: true },
   { columns: [COST_COLUMN], minNameWidth: 8, compact: true },
 ];
@@ -120,7 +148,11 @@ function sumColumnWidths(columns: DataColumn[]): number {
   return columns.reduce((sum, col) => sum + col.width, 0);
 }
 
-function fitCell(s: string, len: number, align: "left" | "right" = "left"): string {
+function fitCell(
+  s: string,
+  len: number,
+  align: "left" | "right" = "left",
+): string {
   if (len <= 0) return "";
   const truncated = truncateToWidth(s, len);
   return align === "right" ? padLeft(truncated, len) : padRight(truncated, len);
@@ -142,7 +174,10 @@ function getTableLayout(width: number): TableLayout {
 
   for (const candidate of TABLE_LAYOUTS) {
     const columnsWidth = sumColumnWidths(candidate.columns);
-    const nameWidth = Math.min(MAX_NAME_COL_WIDTH, Math.max(safeWidth - columnsWidth, 0));
+    const nameWidth = Math.min(
+      MAX_NAME_COL_WIDTH,
+      Math.max(safeWidth - columnsWidth, 0),
+    );
     if (nameWidth >= candidate.minNameWidth) {
       return {
         columns: candidate.columns,
@@ -155,7 +190,10 @@ function getTableLayout(width: number): TableLayout {
 
   const fallback = TABLE_LAYOUTS[TABLE_LAYOUTS.length - 1]!;
   const fallbackColumnsWidth = sumColumnWidths(fallback.columns);
-  const fallbackNameWidth = Math.min(MAX_NAME_COL_WIDTH, Math.max(safeWidth - fallbackColumnsWidth, 0));
+  const fallbackNameWidth = Math.min(
+    MAX_NAME_COL_WIDTH,
+    Math.max(safeWidth - fallbackColumnsWidth, 0),
+  );
   return {
     columns: fallback.columns,
     nameWidth: fallbackNameWidth,
@@ -203,7 +241,12 @@ export class UsageComponent {
   private requestRender: () => void;
   private done: () => void;
 
-  constructor(theme: Theme, data: UsageData, requestRender: () => void, done: () => void) {
+  constructor(
+    theme: Theme,
+    data: UsageData,
+    requestRender: () => void,
+    done: () => void,
+  ) {
     this.theme = theme;
     this.requestRender = requestRender;
     this.done = done;
@@ -216,7 +259,10 @@ export class UsageComponent {
     this.providerOrder = Array.from(stats.providers.entries())
       .sort((a, b) => b[1].cost - a[1].cost)
       .map(([name]) => name);
-    this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.providerOrder.length - 1));
+    this.selectedIndex = Math.min(
+      this.selectedIndex,
+      Math.max(0, this.providerOrder.length - 1),
+    );
   }
 
   handleInput(data: string): void {
@@ -238,7 +284,8 @@ export class UsageComponent {
       this.requestRender();
     } else if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) {
       const idx = SCOPE_ORDER.indexOf(this.activeTab);
-      this.activeTab = SCOPE_ORDER[(idx - 1 + SCOPE_ORDER.length) % SCOPE_ORDER.length]!;
+      this.activeTab =
+        SCOPE_ORDER[(idx - 1 + SCOPE_ORDER.length) % SCOPE_ORDER.length]!;
       this.updateProviderOrder();
       this.requestRender();
     } else if (this.viewMode === "table" && matchesKey(data, "up")) {
@@ -251,7 +298,10 @@ export class UsageComponent {
         this.selectedIndex++;
         this.requestRender();
       }
-    } else if (this.viewMode === "table" && (matchesKey(data, "enter") || matchesKey(data, "space"))) {
+    } else if (
+      this.viewMode === "table" &&
+      (matchesKey(data, "enter") || matchesKey(data, "space"))
+    ) {
       const provider = this.providerOrder[this.selectedIndex];
       if (provider) {
         if (this.expanded.has(provider)) {
@@ -277,7 +327,7 @@ export class UsageComponent {
           ...this.renderInsights(width),
           ...this.renderHelp(width),
         ],
-        width
+        width,
       );
     }
 
@@ -292,13 +342,14 @@ export class UsageComponent {
         ...this.renderFormulaNote(width),
         ...this.renderHelp(width),
       ],
-      width
+      width,
     );
   }
 
   private renderTitle(): string[] {
     const th = this.theme;
-    const label = this.viewMode === "insights" ? "Usage Insights" : "Usage Statistics";
+    const label =
+      this.viewMode === "insights" ? "Usage Insights" : "Usage Statistics";
     return [th.fg("accent", th.bold(label)), ""];
   }
 
@@ -311,7 +362,9 @@ export class UsageComponent {
     const lines: string[] = [];
 
     lines.push("What's contributing to your cost?");
-    lines.push(th.fg("dim", "Approximate, based on local sessions on this machine."));
+    lines.push(
+      th.fg("dim", "Approximate, based on local sessions on this machine."),
+    );
     lines.push("");
     const note = `${TAB_LABELS[this.activeTab]} \u00b7 weighted by cost (USD) \u00b7 these overlap and can sum to >100%`;
     lines.push(th.fg("dim", note));
@@ -337,7 +390,10 @@ export class UsageComponent {
     const adviceWidth = Math.max(width - indent.length, 30);
 
     for (const insight of insights) {
-      const pct = th.fg("accent", th.bold(formatInsightPercent(insight.percent)));
+      const pct = th.fg(
+        "accent",
+        th.bold(formatInsightPercent(insight.percent)),
+      );
       lines.push(`${pct} ${insight.headline}`);
       for (const wrapped of wrapTextWithAnsi(insight.advice, adviceWidth)) {
         lines.push(`${indent}${th.fg("dim", wrapped)}`);
@@ -352,7 +408,9 @@ export class UsageComponent {
     const th = this.theme;
     const fullTabs = SCOPE_ORDER.map((tab) => {
       const label = TAB_LABELS[tab];
-      return tab === this.activeTab ? th.fg("accent", `[${label}]`) : th.fg("dim", ` ${label} `);
+      return tab === this.activeTab
+        ? th.fg("accent", `[${label}]`)
+        : th.fg("dim", ` ${label} `);
     }).join("  ");
 
     const activeTabOnly = th.fg("accent", `[${TAB_LABELS[this.activeTab]}]`);
@@ -364,7 +422,10 @@ export class UsageComponent {
 
     const infoLines =
       this.viewMode === "table" && layout.compact
-        ? wrapTextWithAnsi(th.fg("dim", "Compact view. Widen the terminal for more columns."), Math.max(width, 1))
+        ? wrapTextWithAnsi(
+            th.fg("dim", "Compact view. Widen the terminal for more columns."),
+            Math.max(width, 1),
+          )
         : [];
 
     return [tabLine, ...infoLines, ""];
@@ -379,26 +440,44 @@ export class UsageComponent {
       headerLine += col.dimmed ? th.fg("dim", label) : label;
     }
 
-    return [th.fg("muted", headerLine), th.fg("border", "\u2500".repeat(layout.tableWidth))];
+    return [
+      th.fg("muted", headerLine),
+      th.fg("border", "\u2500".repeat(layout.tableWidth)),
+    ];
   }
 
   private renderDataRow(
     name: string,
     stats: BaseStats & { sessions: Set<string> | number },
     layout: TableLayout,
-    options: { indent?: number; selected?: boolean; dimAll?: boolean; prefix?: string } = {}
+    options: {
+      indent?: number;
+      selected?: boolean;
+      dimAll?: boolean;
+      prefix?: string;
+    } = {},
   ): string {
     const th = this.theme;
     const { indent = 0, selected = false, dimAll = false, prefix } = options;
 
     const rawPrefix = prefix ?? " ".repeat(indent);
-    const safePrefix = layout.nameWidth > 0 ? truncateToWidth(rawPrefix, layout.nameWidth, "") : "";
+    const safePrefix =
+      layout.nameWidth > 0
+        ? truncateToWidth(rawPrefix, layout.nameWidth, "")
+        : "";
     const prefixWidth = visibleWidth(safePrefix);
     const innerNameWidth = Math.max(layout.nameWidth - prefixWidth, 0);
-    const truncName = innerNameWidth > 0 ? truncateToWidth(name, innerNameWidth) : "";
-    const styledName = selected ? th.fg("accent", truncName) : dimAll ? th.fg("dim", truncName) : truncName;
+    const truncName =
+      innerNameWidth > 0 ? truncateToWidth(name, innerNameWidth) : "";
+    const styledName = selected
+      ? th.fg("accent", truncName)
+      : dimAll
+        ? th.fg("dim", truncName)
+        : truncName;
 
-    let row = safePrefix + (innerNameWidth > 0 ? padRight(styledName, innerNameWidth) : "");
+    let row =
+      safePrefix +
+      (innerNameWidth > 0 ? padRight(styledName, innerNameWidth) : "");
 
     for (const col of layout.columns) {
       const value = fitCell(col.getValue(stats), col.width, "right");
@@ -425,20 +504,29 @@ export class UsageComponent {
       const isSelected = i === this.selectedIndex;
       const isExpanded = this.expanded.has(providerName);
       const arrow = isExpanded ? "\u25be" : "\u25b8";
-      const prefix = isSelected ? th.fg("accent", `${arrow} `) : th.fg("dim", `${arrow} `);
+      const prefix = isSelected
+        ? th.fg("accent", `${arrow} `)
+        : th.fg("dim", `${arrow} `);
 
       lines.push(
         this.renderDataRow(providerName, providerStats, layout, {
           selected: isSelected,
           prefix,
-        })
+        }),
       );
 
       if (isExpanded) {
-        const models = Array.from(providerStats.models.entries()).sort((a, b) => b[1].cost - a[1].cost);
+        const models = Array.from(providerStats.models.entries()).sort(
+          (a, b) => b[1].cost - a[1].cost,
+        );
 
         for (const [modelName, modelStats] of models) {
-          lines.push(this.renderDataRow(modelName, modelStats, layout, { indent: 4, dimAll: true }));
+          lines.push(
+            this.renderDataRow(modelName, modelStats, layout, {
+              indent: 4,
+              dimAll: true,
+            }),
+          );
         }
       }
     }
