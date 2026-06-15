@@ -133,6 +133,10 @@ export interface ModeColumnConfig {
   cache: boolean;
   /** Show/hide totals row for this mode */
   showTotals: boolean;
+  /** Show/hide column header row for this mode */
+  showHeaders: boolean;
+  /** Show/hide separator lines (header and footer) for this mode */
+  showLines: boolean;
 }
 
 /**

@@ -44,6 +44,8 @@ function defaultModeColumnConfig(): ModeColumnConfig {
     tokensOut: true,
     cache: true,
     showTotals: true,
+    showHeaders: true,
+    showLines: true,
   };
 }
 

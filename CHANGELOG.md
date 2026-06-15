@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Headers & Lines toggles in Visible Columns settings.** The per-mode Visible Columns menu now includes "Headers" and "Lines" toggles, letting you hide the column header row or separator lines independently in Compact, Per-Model, and Expanded display modes.
+
 ## [0.3.2] - 2026-05-07
 
 ### Changed

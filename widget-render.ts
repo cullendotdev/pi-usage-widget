@@ -667,16 +667,20 @@ function renderCompact(
   const layout = selectTableLayout(candidates, width, false);
 
   // Header
-  lines.push(...renderTableHeader(theme, layout, "Provider / Model", config));
+  if (columnConfig.showHeaders) {
+    lines.push(...renderTableHeader(theme, layout, "Provider / Model", config));
+  }
 
   // Header separator
-  const headerSep = renderSeparatorLine(
-    theme,
-    config,
-    "headerLine",
-    layout.tableWidth,
-  );
-  if (headerSep !== null) lines.push(headerSep);
+  if (columnConfig.showLines) {
+    const headerSep = renderSeparatorLine(
+      theme,
+      config,
+      "headerLine",
+      layout.tableWidth,
+    );
+    if (headerSep !== null) lines.push(headerSep);
+  }
 
   // Provider rows
   const providers = Array.from(data.providers.entries()).sort(
@@ -702,13 +706,15 @@ function renderCompact(
   }
 
   // Footer separator
-  const footerSep = renderSeparatorLine(
-    theme,
-    config,
-    "footerLine",
-    layout.tableWidth,
-  );
-  if (footerSep !== null) lines.push(footerSep);
+  if (columnConfig.showLines) {
+    const footerSep = renderSeparatorLine(
+      theme,
+      config,
+      "footerLine",
+      layout.tableWidth,
+    );
+    if (footerSep !== null) lines.push(footerSep);
+  }
 
   // Totals
   if (columnConfig.showTotals) {
@@ -782,19 +788,25 @@ function renderPerModel(
     layout = selectTableLayout(candidates, width, true);
     layout.nameWidth2 =
       layout.nameWidth2 ?? Math.max(4, Math.floor(layout.nameWidth * 0.6));
-    lines.push(
-      ...renderTableHeader(theme, layout, "Provider", config, "Model"),
-    );
+    if (columnConfig.showHeaders) {
+      lines.push(
+        ...renderTableHeader(theme, layout, "Provider", config, "Model"),
+      );
+    }
   } else if (showProvider && !showModel) {
     // Single provider column
     const candidates = buildLayoutCandidates(columns);
     layout = selectTableLayout(candidates, width, false);
-    lines.push(...renderTableHeader(theme, layout, "Provider", config));
+    if (columnConfig.showHeaders) {
+      lines.push(...renderTableHeader(theme, layout, "Provider", config));
+    }
   } else if (!showProvider && showModel) {
     // Single model column
     const candidates = buildLayoutCandidates(columns);
     layout = selectTableLayout(candidates, width, false);
-    lines.push(...renderTableHeader(theme, layout, "Model", config));
+    if (columnConfig.showHeaders) {
+      lines.push(...renderTableHeader(theme, layout, "Model", config));
+    }
   } else {
     // No name columns — just data
     const candidates = buildLayoutCandidates(columns);
@@ -803,13 +815,15 @@ function renderPerModel(
   }
 
   // Header separator
-  const headerSep = renderSeparatorLine(
-    theme,
-    config,
-    "headerLine",
-    layout.tableWidth,
-  );
-  if (headerSep !== null) lines.push(headerSep);
+  if (columnConfig.showLines) {
+    const headerSep = renderSeparatorLine(
+      theme,
+      config,
+      "headerLine",
+      layout.tableWidth,
+    );
+    if (headerSep !== null) lines.push(headerSep);
+  }
 
   if (models.length === 0) {
     lines.push(colorFg(config, "title", "  No usage data for this period"));
@@ -849,13 +863,15 @@ function renderPerModel(
   }
 
   // Footer separator
-  const footerSep = renderSeparatorLine(
-    theme,
-    config,
-    "footerLine",
-    layout.tableWidth,
-  );
-  if (footerSep !== null) lines.push(footerSep);
+  if (columnConfig.showLines) {
+    const footerSep = renderSeparatorLine(
+      theme,
+      config,
+      "footerLine",
+      layout.tableWidth,
+    );
+    if (footerSep !== null) lines.push(footerSep);
+  }
 
   // Totals
   if (columnConfig.showTotals) {
@@ -925,16 +941,20 @@ function renderExpanded(
   const layout = selectTableLayout(candidates, width, false);
 
   // Header
-  lines.push(...renderTableHeader(theme, layout, "Provider / Model", config));
+  if (columnConfig.showHeaders) {
+    lines.push(...renderTableHeader(theme, layout, "Provider / Model", config));
+  }
 
   // Header separator
-  const headerSep = renderSeparatorLine(
-    theme,
-    config,
-    "headerLine",
-    layout.tableWidth,
-  );
-  if (headerSep !== null) lines.push(headerSep);
+  if (columnConfig.showLines) {
+    const headerSep = renderSeparatorLine(
+      theme,
+      config,
+      "headerLine",
+      layout.tableWidth,
+    );
+    if (headerSep !== null) lines.push(headerSep);
+  }
 
   // Provider rows with expanded models
   const providers = Array.from(data.providers.entries()).sort(
@@ -976,13 +996,15 @@ function renderExpanded(
   }
 
   // Footer separator
-  const footerSep = renderSeparatorLine(
-    theme,
-    config,
-    "footerLine",
-    layout.tableWidth,
-  );
-  if (footerSep !== null) lines.push(footerSep);
+  if (columnConfig.showLines) {
+    const footerSep = renderSeparatorLine(
+      theme,
+      config,
+      "footerLine",
+      layout.tableWidth,
+    );
+    if (footerSep !== null) lines.push(footerSep);
+  }
 
   // Totals
   if (columnConfig.showTotals) {

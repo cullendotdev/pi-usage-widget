@@ -461,6 +461,20 @@ export class SettingsMenu implements Component {
         currentValue: columnConfig.showTotals ? "Show" : "Hide",
         values: TOGGLE_VALUES,
       });
+      items.push({
+        id: "showHeaders",
+        label: "Headers",
+        description: "Show/hide the column header row",
+        currentValue: columnConfig.showHeaders ? "Show" : "Hide",
+        values: TOGGLE_VALUES,
+      });
+      items.push({
+        id: "showLines",
+        label: "Lines",
+        description: "Show/hide separator lines above and below data rows",
+        currentValue: columnConfig.showLines ? "Show" : "Hide",
+        values: TOGGLE_VALUES,
+      });
     }
 
     return new SettingsList(
@@ -1011,7 +1025,8 @@ export class SettingsMenu implements Component {
     lines.push("");
     const previewLabel = this.theme.fg("dim", "┌─ Live Preview " + "─".repeat(Math.max(0, width - 18)));
     lines.push(previewLabel);
-    const previewLines = this.renderPreview(width);
+    const previewWidth = Math.max(0, width - 1);
+    const previewLines = this.renderPreview(previewWidth);
     for (const line of previewLines) {
       lines.push(" " + line);
     }

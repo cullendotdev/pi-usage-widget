@@ -165,6 +165,17 @@ The widget updates automatically:
 - Within ~1 second after each assistant message completes
 - Every 30 seconds to capture background subagent activity
 
+#### Settings
+
+Run `/usage-settings` to open the interactive settings menu. It lets you customize:
+
+- **Display Mode** and **Time Scope** defaults
+- **Theme Preset** with live preview (7 themes: Default, Tokyo Night, Dracula, Gruvbox, Nord, Catppuccin, Monokai)
+- **Visible Columns** — toggle individual stat columns per mode, plus the totals row, column headers, and separator lines
+- **Custom Theme Colors** — override colors per visual element (headers, values, separators)
+
+Settings persist across sessions in `~/.pi/agent/pi-usage-widget-settings.json`.
+
 #### Defaults
 
 On startup, the widget defaults to **Summary** mode and **Today** scope.
