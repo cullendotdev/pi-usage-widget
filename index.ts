@@ -3,7 +3,7 @@
  *
  * Shows an inline widget with usage stats grouped by provider.
  * Sessions persist configuration across restarts.
- * Ctrl+U cycles display modes, Alt+U cycles time scopes.
+ * Ctrl+Alt+U cycles display modes, Alt+U cycles time scopes.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -171,7 +171,7 @@ export default function (pi: ExtensionAPI) {
   // Keyboard Shortcuts
   // =========================================================================
 
-  pi.registerShortcut("ctrl+u", {
+  pi.registerShortcut("ctrl+alt+u", {
     description: "Cycle usage widget display mode",
     handler: async () => currentWidget?.cycleMode(),
   });
@@ -187,7 +187,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("cycle-usage-mode", {
     description: "Cycle usage widget display mode",
-    shortcuts: ["ctrl+u"],
+    shortcuts: ["ctrl+alt+u"],
     handler: async () => currentWidget?.cycleMode(),
   });
 

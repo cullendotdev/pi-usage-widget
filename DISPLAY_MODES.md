@@ -4,7 +4,7 @@ This document describes new display mode widget for the usage extension.
 
 ---
 
-## Five Display Modes (cycled via `Ctrl+U`)
+## Five Display Modes (cycled via `Ctrl+Alt+U`)
 
 ### 1. Summary Mode
 
@@ -99,7 +99,7 @@ Toggles between:
 
 When forking the existing extension that already handles usage tracking:
 
-1. Add the **three display modes** + hidden state with `Ctrl+U` cycling
+1. Add the **three display modes** + hidden state with `Ctrl+Alt+U` cycling
 2. Add the **scope toggle** with `Ctrl+Shift+U`
 3. Ensure the **visual styling** matches (colorized labels, token/cost formatting)
 4. Ensure the **default pi footer is untouched**

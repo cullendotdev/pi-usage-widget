@@ -93,7 +93,7 @@ A live usage widget appears **above the editor** whenever Pi is running. It prov
 
 #### Modes
 
-Press `Ctrl+U` to cycle through five display modes:
+Press `Ctrl+Alt+U` to cycle through five display modes:
 
 1. **Summary** — single-line total cost for the current scope
 
