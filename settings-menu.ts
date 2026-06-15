@@ -18,6 +18,7 @@ import {
   Spacer,
   SettingsList,
   Text,
+  visibleWidth,
   type Component,
   type SettingItem,
   type SettingsListTheme,
@@ -35,18 +36,39 @@ import type {
   ModeColumnConfig,
   ColorOverrides,
 } from "./types.js";
-import { colorPresets, colorElements, resolveColor, hexToAnsi } from "./color-engine.js";
+import {
+  colorPresets,
+  colorElements,
+  resolveColor,
+  hexToAnsi,
+} from "./color-engine.js";
 import type { ColorElement } from "./color-engine.js";
-import { ColorPicker, ELEMENT_LABELS, renderColorSwatch, validateHex } from "./color-picker.js";
+import {
+  ColorPicker,
+  ELEMENT_LABELS,
+  renderColorSwatch,
+  validateHex,
+} from "./color-picker.js";
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const TAB_NAMES = ["Global", "Summary", "Compact", "Per-Model", "Expanded"] as const;
+const TAB_NAMES = [
+  "Global",
+  "Summary",
+  "Per Provider",
+  "Per Model",
+  "Provider & Model",
+] as const;
 type TabIndex = 0 | 1 | 2 | 3 | 4;
 
-const DISPLAY_MODES: DisplayMode[] = ["summary", "compact", "per-model", "expanded"];
+const DISPLAY_MODES: DisplayMode[] = [
+  "summary",
+  "compact",
+  "Per Model",
+  "expanded",
+];
 const TIME_SCOPES: TimeScope[] = [
   "lastHour",
   "today",
@@ -68,9 +90,9 @@ const THEMED_PRESETS: ThemedPreset[] = [
 
 const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
   summary: "Summary",
-  compact: "Compact",
-  "per-model": "Per Model",
-  expanded: "Expanded",
+  compact: "Per Provider",
+  "Per Model": "Per Model",
+  expanded: "Provider & Model",
   hidden: "Hidden",
 };
 
@@ -139,23 +161,43 @@ interface ColumnToggleDef {
 }
 
 const ALL_COLUMNS: ColumnToggleDef[] = [
-  { id: "provider", label: "Provider", description: "Show/hide provider name column" },
+  {
+    id: "provider",
+    label: "Provider",
+    description: "Show/hide provider name column",
+  },
   { id: "model", label: "Model", description: "Show/hide model name column" },
-  { id: "sessions", label: "Sessions", description: "Show/hide sessions column" },
+  {
+    id: "sessions",
+    label: "Sessions",
+    description: "Show/hide sessions column",
+  },
   { id: "msgs", label: "Msgs", description: "Show/hide messages column" },
   { id: "cost", label: "Cost", description: "Show/hide cost column" },
-  { id: "tokens", label: "Tokens", description: "Show/hide total tokens column" },
-  { id: "tokensIn", label: "Tokens In", description: "Show/hide input tokens column" },
-  { id: "tokensOut", label: "Tokens Out", description: "Show/hide output tokens column" },
+  {
+    id: "tokens",
+    label: "Tokens",
+    description: "Show/hide total tokens column",
+  },
+  {
+    id: "tokensIn",
+    label: "Tokens In",
+    description: "Show/hide input tokens column",
+  },
+  {
+    id: "tokensOut",
+    label: "Tokens Out",
+    description: "Show/hide output tokens column",
+  },
   { id: "cache", label: "Cache", description: "Show/hide cache tokens column" },
 ];
 
 /** Map of display mode for each tab index. 0=Global uses config.defaultMode. */
 const TAB_MODE: Record<number, DisplayMode> = {
-  0: "summary",   // Global tab — uses config.defaultMode
+  0: "summary", // Global tab — uses config.defaultMode
   1: "summary",
   2: "compact",
-  3: "per-model",
+  3: "Per Model",
   4: "expanded",
 };
 
@@ -168,7 +210,15 @@ const TOGGLE_VALUES = ["Show", "Hide"];
 type NavDepth = 0 | 1 | 2;
 
 /** Which submenu is active at depth 1. */
-type SubMenuType = "themeOverride" | "columns" | "colors" | "colorsHeaders" | "colorsValues" | "presetPicker";
+type SubMenuType =
+  | "themeOverride"
+  | "columns"
+  | "colors"
+  | "colorsHeaders"
+  | "colorsValues"
+  | "presetPicker"
+  | "displayModePicker"
+  | "activeModes";
 
 // =============================================================================
 // Mock UsageData for live preview
@@ -211,14 +261,26 @@ function buildScopeStats(scale: number): TimeFilteredStats {
   const gemini25Pro = (): ModelStats => ({
     messages: r(52),
     cost: 3.8 * scale,
-    tokens: { total: r(390000), input: r(285000), output: r(102000), cacheRead: r(2500), cacheWrite: r(500) },
+    tokens: {
+      total: r(390000),
+      input: r(285000),
+      output: r(102000),
+      cacheRead: r(2500),
+      cacheWrite: r(500),
+    },
     sessions: new Set([...gemini25ProSessions].slice(0, Math.max(1, r(2)))),
   });
 
   const gemini25Flash = (): ModelStats => ({
     messages: r(35),
     cost: 1.434 * scale,
-    tokens: { total: r(130000), input: r(95000), output: r(33000), cacheRead: r(1500), cacheWrite: r(500) },
+    tokens: {
+      total: r(130000),
+      input: r(95000),
+      output: r(33000),
+      cacheRead: r(1500),
+      cacheWrite: r(500),
+    },
     sessions: new Set([...gemini25FlashSessions].slice(0, Math.max(1, r(2)))),
   });
 
@@ -229,14 +291,26 @@ function buildScopeStats(scale: number): TimeFilteredStats {
   const claudeSonnet = (): ModelStats => ({
     messages: r(68),
     cost: 3.85 * scale,
-    tokens: { total: r(445000), input: r(318000), output: r(124000), cacheRead: r(2200), cacheWrite: r(800) },
+    tokens: {
+      total: r(445000),
+      input: r(318000),
+      output: r(124000),
+      cacheRead: r(2200),
+      cacheWrite: r(800),
+    },
     sessions: new Set([...claudeSonnetSessions].slice(0, Math.max(1, r(2)))),
   });
 
   const claudeHaiku = (): ModelStats => ({
     messages: r(44),
     cost: 1.397 * scale,
-    tokens: { total: r(167000), input: r(125000), output: r(39500), cacheRead: r(1600), cacheWrite: r(900) },
+    tokens: {
+      total: r(167000),
+      input: r(125000),
+      output: r(39500),
+      cacheRead: r(1600),
+      cacheWrite: r(900),
+    },
     sessions: new Set([...claudeHaikuSessions].slice(0, Math.max(1, r(2)))),
   });
 
@@ -248,21 +322,39 @@ function buildScopeStats(scale: number): TimeFilteredStats {
   const gpt4o = (): ModelStats => ({
     messages: r(72),
     cost: 2.5 * scale,
-    tokens: { total: r(210000), input: r(148000), output: r(57000), cacheRead: r(3800), cacheWrite: r(1200) },
+    tokens: {
+      total: r(210000),
+      input: r(148000),
+      output: r(57000),
+      cacheRead: r(3800),
+      cacheWrite: r(1200),
+    },
     sessions: new Set([...gpt4oSessions].slice(0, Math.max(1, r(2)))),
   });
 
   const gpt41Mini = (): ModelStats => ({
     messages: r(38),
     cost: 0.325 * scale,
-    tokens: { total: r(58000), input: r(42000), output: r(15000), cacheRead: r(800), cacheWrite: r(200) },
+    tokens: {
+      total: r(58000),
+      input: r(42000),
+      output: r(15000),
+      cacheRead: r(800),
+      cacheWrite: r(200),
+    },
     sessions: new Set([...gpt41MiniSessions].slice(0, Math.max(1, r(1)))),
   });
 
   const o4Mini = (): ModelStats => ({
     messages: r(33),
     cost: 0.192 * scale,
-    tokens: { total: r(53500), input: r(31000), output: r(21800), cacheRead: r(400), cacheWrite: r(300) },
+    tokens: {
+      total: r(53500),
+      input: r(31000),
+      output: r(21800),
+      cacheRead: r(400),
+      cacheWrite: r(300),
+    },
     sessions: new Set([...o4MiniSessions].slice(0, Math.max(1, r(1)))),
   });
 
@@ -281,10 +373,19 @@ function buildScopeStats(scale: number): TimeFilteredStats {
   openaiModels.set("o4-mini", o4Mini());
 
   // ---- Aggregate totals per provider ----
-  function aggregateProvider(models: Map<string, ModelStats>, sessionIds: string[]): { stats: Omit<ProviderStats, "models">; sessions: Set<string> } {
+  function aggregateProvider(
+    models: Map<string, ModelStats>,
+    sessionIds: string[],
+  ): { stats: Omit<ProviderStats, "models">; sessions: Set<string> } {
     let messages = 0;
     let cost = 0;
-    const tokens = { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    const tokens = {
+      total: 0,
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
     const allSessions = new Set<string>();
 
     for (const m of models.values()) {
@@ -301,7 +402,15 @@ function buildScopeStats(scale: number): TimeFilteredStats {
     // Ensure at least the expected sessions exist (for small scales)
     for (const id of sessionIds) allSessions.add(id);
 
-    return { stats: { messages, cost: Math.round(cost * 1000) / 1000, tokens, sessions: allSessions }, sessions: allSessions };
+    return {
+      stats: {
+        messages,
+        cost: Math.round(cost * 1000) / 1000,
+        tokens,
+        sessions: allSessions,
+      },
+      sessions: allSessions,
+    };
   }
 
   const googleAgg = aggregateProvider(googleModels, ["s1", "s2", "s3"]);
@@ -311,7 +420,10 @@ function buildScopeStats(scale: number): TimeFilteredStats {
   // ---- Providers map ----
   const providers = new Map<string, ProviderStats>();
   providers.set("google", { ...googleAgg.stats, models: googleModels });
-  providers.set("anthropic", { ...anthropicAgg.stats, models: anthropicModels });
+  providers.set("anthropic", {
+    ...anthropicAgg.stats,
+    models: anthropicModels,
+  });
   providers.set("openai", { ...openaiAgg.stats, models: openaiModels });
 
   // ---- Global totals ----
@@ -322,14 +434,38 @@ function buildScopeStats(scale: number): TimeFilteredStats {
   ]);
 
   const totals: TotalStats = {
-    messages: googleAgg.stats.messages + anthropicAgg.stats.messages + openaiAgg.stats.messages,
-    cost: Math.round((googleAgg.stats.cost + anthropicAgg.stats.cost + openaiAgg.stats.cost) * 1000) / 1000,
+    messages:
+      googleAgg.stats.messages +
+      anthropicAgg.stats.messages +
+      openaiAgg.stats.messages,
+    cost:
+      Math.round(
+        (googleAgg.stats.cost +
+          anthropicAgg.stats.cost +
+          openaiAgg.stats.cost) *
+          1000,
+      ) / 1000,
     tokens: {
-      total: googleAgg.stats.tokens.total + anthropicAgg.stats.tokens.total + openaiAgg.stats.tokens.total,
-      input: googleAgg.stats.tokens.input + anthropicAgg.stats.tokens.input + openaiAgg.stats.tokens.input,
-      output: googleAgg.stats.tokens.output + anthropicAgg.stats.tokens.output + openaiAgg.stats.tokens.output,
-      cacheRead: googleAgg.stats.tokens.cacheRead + anthropicAgg.stats.tokens.cacheRead + openaiAgg.stats.tokens.cacheRead,
-      cacheWrite: googleAgg.stats.tokens.cacheWrite + anthropicAgg.stats.tokens.cacheWrite + openaiAgg.stats.tokens.cacheWrite,
+      total:
+        googleAgg.stats.tokens.total +
+        anthropicAgg.stats.tokens.total +
+        openaiAgg.stats.tokens.total,
+      input:
+        googleAgg.stats.tokens.input +
+        anthropicAgg.stats.tokens.input +
+        openaiAgg.stats.tokens.input,
+      output:
+        googleAgg.stats.tokens.output +
+        anthropicAgg.stats.tokens.output +
+        openaiAgg.stats.tokens.output,
+      cacheRead:
+        googleAgg.stats.tokens.cacheRead +
+        anthropicAgg.stats.tokens.cacheRead +
+        openaiAgg.stats.tokens.cacheRead,
+      cacheWrite:
+        googleAgg.stats.tokens.cacheWrite +
+        anthropicAgg.stats.tokens.cacheWrite +
+        openaiAgg.stats.tokens.cacheWrite,
     },
     sessions: allSessions.size,
   };
@@ -344,7 +480,10 @@ function buildScopeStats(scale: number): TimeFilteredStats {
 // SettingsList theme
 // =============================================================================
 
-function createSettingsListTheme(theme: Theme, isGlobal: boolean = true): SettingsListTheme {
+function createSettingsListTheme(
+  theme: Theme,
+  isGlobal: boolean = true,
+): SettingsListTheme {
   return {
     label: (text: string, _selected: boolean) => {
       return theme.fg(isGlobal ? "text" : "dim", text);
@@ -370,6 +509,10 @@ export class SettingsMenu implements Component {
   private tui: { requestRender: () => void };
   private done: () => void;
   private activeTab: TabIndex = 0; // Default to Global tab (first tab)
+  /** When true, renders a "Switch widget to [Mode]?" prompt instead of normal content. */
+  private showClosePrompt = false;
+  /** Flash warning message shown briefly in the mode navigator (cleared on next input). */
+  private flashWarning: string | null = null;
 
   // Submenu SettingsLists (created on demand)
   private activeSettingsList: SettingsList | null = null;
@@ -437,23 +580,36 @@ export class SettingsMenu implements Component {
     const columnConfig = this.config.modes[mode];
     const items: SettingItem[] = [];
     const isSummary = mode === "summary";
+    const isCompact = mode === "compact";
+
+    // Determine which columns are applicable for this mode:
+    // - Summary: single-line pipe, no name columns, no meta toggles
+    // - Per-Provider (Compact): provider column only, no model
+    // - Per-Model: always shows combined provider/model — no toggles for either
+    // - Provider+Model (Expanded): both provider and model toggles
+    const isPerModel = mode === "Per Model";
+    const showProvider = (isCompact || mode === "expanded") && !isPerModel;
+    const showModel = mode === "expanded" && !isPerModel;
+    const showMeta = !isSummary; // showTotals, showHeaders, showHeaderLine, showFooterLine
 
     for (const col of ALL_COLUMNS) {
+      // Skip provider if not applicable to this mode
+      if (col.id === "provider" && !showProvider) continue;
+      // Skip model if not applicable to this mode
+      if (col.id === "model" && !showModel) continue;
+
       const visible = columnConfig[col.id] as boolean;
-      const desc = isSummary && (col.id === "provider" || col.id === "model")
-        ? col.description + " (less useful in summary mode)"
-        : col.description;
 
       items.push({
         id: col.id,
         label: col.label,
-        description: desc,
+        description: col.description,
         currentValue: visible ? "Show" : "Hide",
         values: TOGGLE_VALUES,
       });
     }
 
-    if (!isSummary) {
+    if (showMeta) {
       items.push({
         id: "showTotals",
         label: "Totals Row",
@@ -469,10 +625,18 @@ export class SettingsMenu implements Component {
         values: TOGGLE_VALUES,
       });
       items.push({
-        id: "showLines",
-        label: "Lines",
-        description: "Show/hide separator lines above and below data rows",
-        currentValue: columnConfig.showLines ? "Show" : "Hide",
+        id: "showHeaderLine",
+        label: "Header Line",
+        description:
+          "Show/hide the header separator line below the column headers",
+        currentValue: columnConfig.showHeaderLine ? "Show" : "Hide",
+        values: TOGGLE_VALUES,
+      });
+      items.push({
+        id: "showFooterLine",
+        label: "Footer Line",
+        description: "Show/hide the footer separator line above the totals row",
+        currentValue: columnConfig.showFooterLine ? "Show" : "Hide",
         values: TOGGLE_VALUES,
       });
     }
@@ -535,7 +699,12 @@ export class SettingsMenu implements Component {
         // Global tab: the settings list items + Colors
         return []; // Global tab uses SettingsList directly
       } else {
-        return ["Visible Columns", "Theme Preset", "Custom Theme Colors"];
+        return [
+          "Enabled",
+          "Customize Layout",
+          "Theme Preset",
+          "Custom Theme Colors",
+        ];
       }
     }
     if (this.depth === 1 && this.activeSubMenu === "colors") {
@@ -553,7 +722,13 @@ export class SettingsMenu implements Component {
     const lines: string[] = [];
     const innerWidth = width - 4;
 
-    lines.push("  " + this.theme.fg("dim", "┌─ Theme Preset " + "─".repeat(Math.max(0, innerWidth - 15))));
+    lines.push(
+      "  " +
+        this.theme.fg(
+          "dim",
+          "┌─ Theme Preset " + "─".repeat(Math.max(0, innerWidth - 15)),
+        ),
+    );
     lines.push("");
 
     for (let i = 0; i < THEMED_PRESETS.length; i++) {
@@ -569,15 +744,23 @@ export class SettingsMenu implements Component {
     }
 
     lines.push("");
-    lines.push("  " + this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))));
+    lines.push(
+      "  " +
+        this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))),
+    );
     lines.push("");
-    lines.push("  " + this.theme.fg("dim", "↑↓ select  Enter confirm  Esc cancel"));
+    lines.push(
+      "  " + this.theme.fg("dim", "↑↓ select  Enter confirm  Esc cancel"),
+    );
 
     return lines;
   }
 
   /** Handle input in the preset picker list (both Global and per-mode). */
-  private handlePresetPickerInput(input: string, mode: DisplayMode | null): void {
+  private handlePresetPickerInput(
+    input: string,
+    mode: DisplayMode | null,
+  ): void {
     if (input === "\x1b[A" || input === "\x1bOA") {
       if (this.selectedIndex > 0) {
         this.selectedIndex--;
@@ -619,6 +802,186 @@ export class SettingsMenu implements Component {
   }
 
   // ===========================================================================
+  // Display mode picker (Global tab — item 0 submenu)
+  // ===========================================================================
+
+  /** Render the display mode picker list. */
+  private renderDisplayModePicker(width: number): string[] {
+    const lines: string[] = [];
+    const innerWidth = width - 4;
+    const modes = [...DISPLAY_MODES, "hidden" as DisplayMode];
+
+    lines.push(
+      "  " +
+        this.theme.fg(
+          "dim",
+          "┌─ Widget Mode " + "─".repeat(Math.max(0, innerWidth - 16)),
+        ),
+    );
+    lines.push("");
+
+    for (let i = 0; i < modes.length; i++) {
+      const dm = modes[i]!;
+      const label = DISPLAY_MODE_LABELS[dm] ?? dm;
+      const isSelected = i === this.selectedIndex;
+      const isCurrent = dm === this.config.defaultMode;
+      const cursor = isSelected ? this.theme.fg("accent", "▸ ") : "  ";
+      const check = isCurrent ? this.theme.fg("success", " ✓") : "";
+      const text = isSelected
+        ? this.theme.fg("accent", label)
+        : this.theme.fg("text", label);
+      lines.push("  " + cursor + text + check);
+    }
+
+    lines.push("");
+    lines.push(
+      "  " +
+        this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))),
+    );
+    lines.push("");
+    lines.push(
+      "  " + this.theme.fg("dim", "↑↓ select  Enter confirm  Esc cancel"),
+    );
+
+    return lines;
+  }
+
+  /** Handle input in the display mode picker. */
+  private handleDisplayModePickerInput(input: string): void {
+    const modes = [...DISPLAY_MODES, "hidden" as DisplayMode];
+    if (input === "\x1b[A" || input === "\x1bOA") {
+      if (this.selectedIndex > 0) {
+        this.selectedIndex--;
+        this.tui.requestRender();
+      }
+      return;
+    }
+    if (input === "\x1b[B" || input === "\x1bOB") {
+      if (this.selectedIndex < modes.length - 1) {
+        this.selectedIndex++;
+        this.tui.requestRender();
+      }
+      return;
+    }
+    if (input === "\r" || input === "\n") {
+      const dm = modes[this.selectedIndex];
+      if (dm && dm !== this.config.defaultMode) {
+        this.config.defaultMode = dm;
+        saveConfig(this.config);
+        this.invalidatePreview();
+      }
+      this.navigateBack();
+      return;
+    }
+  }
+
+  // ===========================================================================
+  // Active modes picker
+  // ===========================================================================
+
+  /** Render the active modes toggle list in the Global tab submenu. */
+  private renderActiveModesPicker(width: number): string[] {
+    const lines: string[] = [];
+    const innerWidth = width - 4;
+    const modes: DisplayMode[] = [
+      "summary",
+      "compact",
+      "Per Model",
+      "expanded",
+    ];
+    const modeLabels: Record<DisplayMode, string> = {
+      summary: "Summary",
+      compact: "Per Provider",
+      "Per Model": "Per Model",
+      expanded: "Provider & Model",
+      hidden: "Hidden",
+    };
+
+    lines.push(
+      "  " +
+        this.theme.fg(
+          "dim",
+          "┌─ Active Modes " + "─".repeat(Math.max(0, innerWidth - 15)),
+        ),
+    );
+    lines.push("");
+
+    for (let i = 0; i < modes.length; i++) {
+      const mode = modes[i]!;
+      const label = modeLabels[mode] ?? mode;
+      const enabled = this.config.enabledModes[mode] ?? true;
+      const isSelected = i === this.selectedIndex;
+      const cursor = isSelected ? this.theme.fg("accent", "▸ ") : "  ";
+
+      // Green ● for enabled, dim ○ for disabled — right next to name
+      const indicator = enabled
+        ? this.theme.fg("success", "●")
+        : this.theme.fg("dim", "○");
+
+      // Build: [ ● ModeName ]
+      const badge = "[ " + indicator + " " + label + " ]";
+
+      const text = isSelected
+        ? this.theme.fg("accent", badge)
+        : enabled
+          ? this.theme.fg("text", badge)
+          : this.theme.fg("dim", badge);
+
+      lines.push("  " + cursor + text);
+    }
+
+    lines.push("");
+    lines.push(
+      "  " +
+        this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))),
+    );
+
+    return lines;
+  }
+
+  /** Handle input in the active modes picker. */
+  private handleActiveModesInput(input: string): void {
+    const modes: DisplayMode[] = [
+      "summary",
+      "compact",
+      "Per Model",
+      "expanded",
+    ];
+
+    if (input === "\x1b[A" || input === "\x1bOA") {
+      if (this.selectedIndex > 0) {
+        this.selectedIndex--;
+        this.tui.requestRender();
+      }
+      return;
+    }
+    if (input === "\x1b[B" || input === "\x1bOB") {
+      if (this.selectedIndex < modes.length - 1) {
+        this.selectedIndex++;
+        this.tui.requestRender();
+      }
+      return;
+    }
+
+    // Toggle with Enter, Left, or Right
+    if (
+      input === "\r" ||
+      input === "\n" ||
+      input === "\x1b[C" ||
+      input === "\x1bOC" ||
+      input === "\x1b[D" ||
+      input === "\x1bOD"
+    ) {
+      const mode = modes[this.selectedIndex];
+      if (mode) {
+        this.toggleActiveMode(mode);
+        this.tui.requestRender();
+      }
+      return;
+    }
+  }
+
+  // ===========================================================================
   // Color picker integration
   // ===========================================================================
 
@@ -627,7 +990,10 @@ export class SettingsMenu implements Component {
    * @param element  The color element to edit
    * @param mode     Display mode for per-mode overrides (null = global)
    */
-  private openColorPicker(element: ColorElement, mode: DisplayMode | null): void {
+  private openColorPicker(
+    element: ColorElement,
+    mode: DisplayMode | null,
+  ): void {
     this.editingElement = element;
     this.editingMode = mode;
 
@@ -682,9 +1048,16 @@ export class SettingsMenu implements Component {
   // ===========================================================================
 
   /** Get a color swatch for the resolved color of an element. */
-  private getResolvedColorSwatch(element: ColorElement, mode: DisplayMode | null): string {
+  private getResolvedColorSwatch(
+    element: ColorElement,
+    mode: DisplayMode | null,
+  ): string {
     try {
-      const ansi = resolveColor(element, this.config, mode ? { mode } : undefined);
+      const ansi = resolveColor(
+        element,
+        this.config,
+        mode ? { mode } : undefined,
+      );
       const trueColorMatch = ansi.match(/38;2;(\d+);(\d+);(\d+)/);
       if (trueColorMatch) {
         const r = parseInt(trueColorMatch[1]);
@@ -716,7 +1089,14 @@ export class SettingsMenu implements Component {
 
     // Section header
     lines.push("");
-    lines.push("  " + this.theme.fg("dim", `┌─ ${sectionLabel} ` + "─".repeat(Math.max(0, innerWidth - sectionLabel.length - 4))));
+    lines.push(
+      "  " +
+        this.theme.fg(
+          "dim",
+          `┌─ ${sectionLabel} ` +
+            "─".repeat(Math.max(0, innerWidth - sectionLabel.length - 4)),
+        ),
+    );
     lines.push("");
 
     for (let i = 0; i < Math.min(maxVisible, elements.length); i++) {
@@ -728,7 +1108,8 @@ export class SettingsMenu implements Component {
       const overrides = mode
         ? this.config.perModeColorOverrides[mode]
         : this.config.globalColorOverrides;
-      const overrideVal = (overrides as Record<string, string | null>)[element] ?? null;
+      const overrideVal =
+        (overrides as Record<string, string | null>)[element] ?? null;
 
       const cursor = isSelected ? this.theme.fg("accent", "▸") : " ";
       const swatch = this.getResolvedColorSwatch(element, mode);
@@ -747,7 +1128,10 @@ export class SettingsMenu implements Component {
     }
 
     lines.push("");
-    lines.push("  " + this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))));
+    lines.push(
+      "  " +
+        this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))),
+    );
     lines.push("");
 
     // Hint
@@ -761,46 +1145,65 @@ export class SettingsMenu implements Component {
   // Navigator rendering (mode tabs at depth 0 and colors submenu at depth 1)
   // ===========================================================================
 
-  /** Render the 3-item navigator for mode tabs at depth 0. */
+  /** Render the 4-item navigator for mode tabs at depth 0. */
   private renderModeNavigator(width: number): string[] {
     const mode = this.getCurrentModeTab();
     if (!mode) return [];
     const lines: string[] = [];
 
-    // ---- Item 0: Visible Columns ----
+    // Flash warning
+    if (this.flashWarning) {
+      lines.push("  " + this.theme.fg("warning", this.flashWarning));
+      lines.push("");
+    }
+
+    // ---- Item 0: Enabled ----
+    const enabled = this.config.enabledModes[mode] ?? true;
     const isSelected0 = this.selectedIndex === 0 && this.depth === 0;
     const cursor0 = isSelected0 ? this.theme.fg("accent", "▸ ") : "  ";
     const label0 = isSelected0
-      ? this.theme.fg("accent", "Visible Columns")
-      : this.theme.fg("text", "Visible Columns");
-    const arrow0 = this.theme.fg("dim", " ▶");
-    lines.push(cursor0 + label0 + arrow0);
+      ? this.theme.fg("accent", "Enabled: ")
+      : this.theme.fg("text", "Enabled: ");
+    const value0 = isSelected0
+      ? this.theme.fg("accent", enabled ? "On" : "Off")
+      : this.theme.fg("text", enabled ? "On" : "Off");
+    const toggle0 = this.theme.fg("dim", " ◐");
+    lines.push(cursor0 + label0 + value0 + toggle0);
 
-    // ---- Item 1: Theme Preset ----
+    // ---- Item 1: Customize Layout ----
+    const isSelected1 = this.selectedIndex === 1 && this.depth === 0;
+    const cursor1 = isSelected1 ? this.theme.fg("accent", "▸ ") : "  ";
+    const label1 = isSelected1
+      ? this.theme.fg("accent", "Customize Layout")
+      : this.theme.fg("text", "Customize Layout");
+    const arrow1 = this.theme.fg("dim", " ▶");
+    lines.push(cursor1 + label1 + arrow1);
+
+    // ---- Item 2: Theme Preset ----
     const overridePreset = this.config.perModeThemedPreset[mode];
     const effectivePreset = overridePreset ?? this.config.themedPreset;
     const presetLabel = PRESET_LABELS[effectivePreset] ?? effectivePreset;
     const statusTag = overridePreset ? " (Override)" : " (Global)";
     const themeValue = presetLabel + statusTag;
 
-    const isSelected1 = this.selectedIndex === 1 && this.depth === 0;
-    const cursor1 = isSelected1 ? this.theme.fg("accent", "▸ ") : "  ";
-    const label1 = isSelected1
-      ? this.theme.fg("accent", "Theme Preset: ")
-      : this.theme.fg("text", "Theme Preset: ");
-    const value1 = isSelected1
-      ? this.theme.fg("accent", themeValue)
-      : this.theme.fg("text", themeValue);
-    lines.push(cursor1 + label1 + value1);
-
-    // ---- Item 2: Custom Theme Colors ----
     const isSelected2 = this.selectedIndex === 2 && this.depth === 0;
     const cursor2 = isSelected2 ? this.theme.fg("accent", "▸ ") : "  ";
     const label2 = isSelected2
+      ? this.theme.fg("accent", "Theme Preset: ")
+      : this.theme.fg("text", "Theme Preset: ");
+    const value2 = isSelected2
+      ? this.theme.fg("accent", themeValue)
+      : this.theme.fg("text", themeValue);
+    lines.push(cursor2 + label2 + value2);
+
+    // ---- Item 3: Custom Theme Colors ----
+    const isSelected3 = this.selectedIndex === 3 && this.depth === 0;
+    const cursor3 = isSelected3 ? this.theme.fg("accent", "▸ ") : "  ";
+    const label3 = isSelected3
       ? this.theme.fg("accent", "Custom Theme Colors")
       : this.theme.fg("text", "Custom Theme Colors");
-    const arrow2 = this.theme.fg("dim", " ▶");
-    lines.push(cursor2 + label2 + arrow2);
+    const arrow3 = this.theme.fg("dim", " ▶");
+    lines.push(cursor3 + label3 + arrow3);
 
     return lines;
   }
@@ -855,18 +1258,30 @@ export class SettingsMenu implements Component {
     const previewMode = this.getActiveTabMode();
 
     // If a preset is being hovered, preview with that preset's colors
-    const effectiveConfig = this.previewPreset !== null
-      ? { ...this.config, themedPreset: this.previewPreset }
-      : this.config;
+    const effectiveConfig =
+      this.previewPreset !== null
+        ? { ...this.config, themedPreset: this.previewPreset }
+        : this.config;
 
     // Skip cache when previewing a transient preset
-    if (this.previewPreset === null && this.previewCacheWidth === width && this.previewCacheMode === previewMode && this.previewCache.length > 0) {
+    if (
+      this.previewPreset === null &&
+      this.previewCacheWidth === width &&
+      this.previewCacheMode === previewMode &&
+      this.previewCache.length > 0
+    ) {
       return this.previewCache;
     }
 
     try {
       const mockData = createMockUsageData();
-      const lines = renderWidget(effectiveConfig, this.theme, mockData, width, previewMode);
+      const lines = renderWidget(
+        effectiveConfig,
+        this.theme,
+        mockData,
+        width,
+        previewMode,
+      );
       if (this.previewPreset === null) {
         this.previewCache = lines;
         this.previewCacheWidth = width;
@@ -888,15 +1303,20 @@ export class SettingsMenu implements Component {
     const ac = this.theme.fg.bind(this.theme);
 
     // ---- Item 0: Display Mode ----
-    const modeLabel = DISPLAY_MODE_LABELS[this.config.defaultMode] ?? this.config.defaultMode;
+    const modeLabel =
+      DISPLAY_MODE_LABELS[this.config.defaultMode] ?? this.config.defaultMode;
     const sel0 = idx === 0;
     const c0 = sel0 ? ac("accent", "▸ ") : "  ";
-    const l0 = sel0 ? ac("accent", "Display Mode: ") : ac("text", "Display Mode: ");
+    const l0 = sel0
+      ? ac("accent", "Default Widget Mode: ")
+      : ac("text", "Default Widget Mode: ");
     const v0 = sel0 ? ac("accent", modeLabel) : ac("text", modeLabel);
-    lines.push(c0 + l0 + v0);
+    const a0 = ac("dim", " ▶");
+    lines.push(c0 + l0 + v0 + a0);
 
     // ---- Item 1: Time Scope ----
-    const scopeLabel = TIME_SCOPE_LABELS[this.config.defaultScope] ?? this.config.defaultScope;
+    const scopeLabel =
+      TIME_SCOPE_LABELS[this.config.defaultScope] ?? this.config.defaultScope;
     const sel1 = idx === 1;
     const c1 = sel1 ? ac("accent", "▸ ") : "  ";
     const l1 = sel1 ? ac("accent", "Time Scope: ") : ac("text", "Time Scope: ");
@@ -904,19 +1324,42 @@ export class SettingsMenu implements Component {
     lines.push(c1 + l1 + v1);
 
     // ---- Item 2: Theme Preset ----
-    const presetLabel = PRESET_LABELS[this.config.themedPreset] ?? this.config.themedPreset;
+    const presetLabel =
+      PRESET_LABELS[this.config.themedPreset] ?? this.config.themedPreset;
     const sel2 = idx === 2;
     const c2 = sel2 ? ac("accent", "▸ ") : "  ";
-    const l2 = sel2 ? ac("accent", "Theme Preset: ") : ac("text", "Theme Preset: ");
+    const l2 = sel2
+      ? ac("accent", "Theme Preset: ")
+      : ac("text", "Theme Preset: ");
     const v2 = sel2 ? ac("accent", presetLabel) : ac("text", presetLabel);
     lines.push(c2 + l2 + v2);
 
     // ---- Item 3: Custom Theme Colors ----
     const sel3 = idx === 3;
     const c3 = sel3 ? ac("accent", "▸ ") : "  ";
-    const l3 = sel3 ? ac("accent", "Custom Theme Colors") : ac("text", "Custom Theme Colors");
+    const l3 = sel3
+      ? ac("accent", "Custom Theme Colors")
+      : ac("text", "Custom Theme Colors");
     const a3 = ac("dim", " ▶");
     lines.push(c3 + l3 + a3);
+
+    // ---- Item 4: Active Modes ----
+    const enabledList = (
+      ["summary", "compact", "Per Model", "expanded"] as DisplayMode[]
+    )
+      .filter((m) => this.config.enabledModes[m] ?? true)
+      .map((m) => DISPLAY_MODE_LABELS[m] ?? m)
+      .join(", ");
+    const activeModesLabel = enabledList
+      ? `Active Modes: ${enabledList}`
+      : "Active Modes";
+    const sel4 = idx === 4;
+    const c4 = sel4 ? ac("accent", "▸ ") : "  ";
+    const l4 = sel4
+      ? ac("accent", activeModesLabel)
+      : ac("text", activeModesLabel);
+    const a4 = ac("dim", " ▶");
+    lines.push(c4 + l4 + a4);
 
     return lines;
   }
@@ -936,19 +1379,36 @@ export class SettingsMenu implements Component {
     // Colors submenu at depth 1 works the same for both Global and mode tabs
     if (this.depth === 1 && this.activeSubMenu === "colors") {
       const lines: string[] = [];
-      lines.push("  " + this.theme.fg("dim", "┌─ Custom Theme Colors " + "─".repeat(Math.max(0, width - 25))));
+      lines.push(
+        "  " +
+          this.theme.fg(
+            "dim",
+            "┌─ Custom Theme Colors " + "─".repeat(Math.max(0, width - 25)),
+          ),
+      );
       lines.push("");
       lines.push(...this.renderColorsSubmenu(width));
       lines.push("");
-      lines.push("  " + this.theme.fg("dim", "└" + "─".repeat(Math.max(0, width - 3))));
+      lines.push(
+        "  " + this.theme.fg("dim", "└" + "─".repeat(Math.max(0, width - 3))),
+      );
       return lines;
     }
 
     // Color element lists at depth 2 work the same for both Global and mode tabs
-    if (this.depth === 2 && (this.activeSubMenu === "colorsHeaders" || this.activeSubMenu === "colorsValues")) {
-      const elements = this.activeSubMenu === "colorsHeaders" ? HEADER_ELEMENTS : VALUE_ELEMENTS;
-      const sectionLabel = this.activeSubMenu === "colorsHeaders" ? "Headers" : "Values";
-      const mode = this.activeTab === 0 ? null : (TAB_MODE[this.activeTab] ?? "compact");
+    if (
+      this.depth === 2 &&
+      (this.activeSubMenu === "colorsHeaders" ||
+        this.activeSubMenu === "colorsValues")
+    ) {
+      const elements =
+        this.activeSubMenu === "colorsHeaders"
+          ? HEADER_ELEMENTS
+          : VALUE_ELEMENTS;
+      const sectionLabel =
+        this.activeSubMenu === "colorsHeaders" ? "Headers" : "Values";
+      const mode =
+        this.activeTab === 0 ? null : (TAB_MODE[this.activeTab] ?? "compact");
       return this.renderColorElementList(elements, mode, width, sectionLabel);
     }
 
@@ -971,26 +1431,100 @@ export class SettingsMenu implements Component {
       return [this.theme.fg("accent", `  ${TAB_NAMES[this.activeTab]}  `)];
     }
 
-    const tabWidth = Math.min(14, Math.floor((width - 4) / TAB_NAMES.length));
-    let line = " ";
+    // Build each tab as [● Name] with indicator inside the brackets
+    let segments: string[] = [];
+    let totalVisible = 0;
 
     for (let i = 0; i < TAB_NAMES.length; i++) {
       const name = TAB_NAMES[i];
       const isActive = i === this.activeTab;
-      const displayName = name.length > tabWidth - 2
-        ? name.slice(0, tabWidth - 4) + "…"
-        : name;
+      const isModeTab = i > 0;
+      const mode = isModeTab ? TAB_MODE[i] : null;
+      const enabled = mode ? (this.config.enabledModes[mode] ?? true) : true;
 
-      const padding = Math.max(0, tabWidth - displayName.length - 2);
-      const leftPad = Math.floor(padding / 2);
-      const rightPad = Math.ceil(padding / 2);
+      // Build the indicator (mode tabs only)
+      const indicator = isModeTab
+        ? (enabled
+            ? this.theme.fg("success", "●")
+            : this.theme.fg("dim", "○")) + " "
+        : "";
 
-      const padded = " ".repeat(leftPad) + displayName + " ".repeat(rightPad);
+      // Build text inside brackets with padding: [ <indicator>Name ]
+      const inner = indicator + name;
+      const segment = "[ " + inner + " ]";
 
+      // Color the segment
+      let colored: string;
       if (isActive) {
-        line += this.theme.bg("selectedBg", this.theme.fg("text", padded));
+        colored = this.theme.bg("selectedBg", this.theme.fg("text", segment));
+      } else if (isModeTab && !enabled) {
+        colored = this.theme.fg("dim", segment);
       } else {
-        line += this.theme.fg("muted", padded);
+        colored = this.theme.fg("text", segment);
+      }
+
+      segments.push(colored);
+      totalVisible += visibleWidth(segment);
+    }
+
+    // Join with one space between tabs
+    const totalWithSpaces = totalVisible + segments.length - 1;
+    let line = " ";
+
+    // If too wide, use equal-width tabs
+    if (totalWithSpaces > width - 2) {
+      const tabWidth = Math.min(
+        14,
+        Math.floor((width - 4 - (TAB_NAMES.length - 1)) / TAB_NAMES.length),
+      );
+      for (let i = 0; i < TAB_NAMES.length; i++) {
+        const name = TAB_NAMES[i];
+        const isActive = i === this.activeTab;
+        const isModeTab = i > 0;
+        const mode = isModeTab ? TAB_MODE[i] : null;
+        const enabled = mode ? (this.config.enabledModes[mode] ?? true) : true;
+
+        const indicator = isModeTab
+          ? enabled
+            ? this.theme.fg("success", "●")
+            : this.theme.fg("dim", "○")
+          : "";
+
+        // Bracketed format: [● Name]
+        // displayName truncated to leave room for brackets (2) + indicator (1) + spaces (2)
+        const bracketOverhead = 5; // "[" + "●" + " " + " " + "]"
+        const displayName =
+          name.length > tabWidth - bracketOverhead
+            ? name.slice(0, tabWidth - bracketOverhead - 2) + "…"
+            : name;
+
+        const padding = Math.max(
+          0,
+          tabWidth - displayName.length - bracketOverhead,
+        );
+        const leftPad = Math.floor(padding / 2);
+        const rightPad = Math.ceil(padding / 2);
+        const padded =
+          "[" + indicator + " " + displayName + " ".repeat(rightPad) + "]";
+        const totalLen = visibleWidth(padded);
+
+        if (isActive) {
+          line +=
+            this.theme.bg("selectedBg", this.theme.fg("text", padded)) +
+            " ".repeat(Math.max(0, tabWidth - totalLen));
+        } else {
+          line +=
+            (enabled
+              ? this.theme.fg("text", padded)
+              : this.theme.fg("dim", padded)) +
+            " ".repeat(Math.max(0, tabWidth - totalLen));
+        }
+      }
+    } else {
+      // Wide enough — use bracket style
+      for (let i = 0; i < segments.length; i++) {
+        line += segments[i];
+        if (i < segments.length - 1) line += " ";
       }
     }
 
@@ -1023,7 +1557,18 @@ export class SettingsMenu implements Component {
   private renderPreviewSection(width: number): string[] {
     const lines: string[] = [];
     lines.push("");
-    const previewLabel = this.theme.fg("dim", "┌─ Live Preview " + "─".repeat(Math.max(0, width - 18)));
+    const modeLabel =
+      DISPLAY_MODE_LABELS[this.getActiveTabMode() as DisplayMode] ??
+      this.getActiveTabMode();
+    const suffix = ` - ${modeLabel}`;
+    const baseLen = 18 + suffix.length;
+    const previewLabel = this.theme.fg(
+      "dim",
+      "┌─ Live Preview" +
+        suffix +
+        " " +
+        "─".repeat(Math.max(0, width - baseLen)),
+    );
     lines.push(previewLabel);
     const previewWidth = Math.max(0, width - 1);
     const previewLines = this.renderPreview(previewWidth);
@@ -1045,31 +1590,55 @@ export class SettingsMenu implements Component {
     // If color picker is active, render it instead of normal content
     if (this.colorPicker) {
       const elementName = this.editingElement
-        ? ELEMENT_LABELS[this.editingElement] ?? this.editingElement
+        ? (ELEMENT_LABELS[this.editingElement] ?? this.editingElement)
         : "Unknown";
       const context = this.editingMode
         ? `${elementName} (${this.editingMode} mode)`
         : `${elementName} (global)`;
 
       const pickerLines = this.colorPicker.render(safeWidth);
+      return [this.theme.fg("dim", `Editing: ${context}`), "", ...pickerLines];
+    }
+
+    // Close prompt — ask user if they want to switch to the tab's mode
+    if (this.showClosePrompt) {
+      const tabMode = this.getCurrentModeTab();
+      const modeLabel = tabMode
+        ? (DISPLAY_MODE_LABELS[tabMode] ?? tabMode)
+        : "?";
+      const msg = `Switch widget to ${modeLabel} mode? (y/n)`;
+      const pad = Math.max(2, Math.floor((safeWidth - msg.length) / 2));
       return [
-        this.theme.fg("dim", `Editing: ${context}`),
+        this.theme.fg("border", "─".repeat(safeWidth)),
         "",
-        ...pickerLines,
+        " ".repeat(pad) + this.theme.fg("accent", msg),
+        "",
+        this.theme.fg("border", "─".repeat(safeWidth)),
       ];
     }
 
     // If activeSettingsList is set (depth 1 Columns submenu), render it
-    if (this.activeSettingsList && this.depth === 1 && this.activeSubMenu === "columns") {
+    if (
+      this.activeSettingsList &&
+      this.depth === 1 &&
+      this.activeSubMenu === "columns"
+    ) {
       const lines: string[] = [];
 
       // Top border
       lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
 
       // Title
-      const title = " Visible Columns ";
+      const title = " Customize Layout ";
       const titlePad = Math.floor((safeWidth - title.length) / 2);
-      lines.push(this.theme.fg("border", "─".repeat(titlePad) + title + "─".repeat(safeWidth - titlePad - title.length)));
+      lines.push(
+        this.theme.fg(
+          "border",
+          "─".repeat(titlePad) +
+            title +
+            "─".repeat(safeWidth - titlePad - title.length),
+        ),
+      );
       lines.push("");
 
       // Live preview
@@ -1091,8 +1660,83 @@ export class SettingsMenu implements Component {
       return lines;
     }
 
+    // If display mode picker is active
+    if (this.depth === 1 && this.activeSubMenu === "displayModePicker") {
+      const lines: string[] = [];
+
+      // Top border
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      // Title
+      const title = " Widget Mode ";
+      const titlePad = Math.floor((safeWidth - title.length) / 2);
+      lines.push(
+        this.theme.fg(
+          "border",
+          "─".repeat(titlePad) +
+            title +
+            "─".repeat(safeWidth - titlePad - title.length),
+        ),
+      );
+      lines.push("");
+
+      // Live preview
+      lines.push(...this.renderPreviewSection(safeWidth));
+
+      // Display mode picker list
+      const pickerLines = this.renderDisplayModePicker(safeWidth);
+      for (const line of pickerLines) {
+        lines.push(line);
+      }
+
+      lines.push("");
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      return lines;
+    }
+
+    // If active modes picker is active
+    if (this.depth === 1 && this.activeSubMenu === "activeModes") {
+      const lines: string[] = [];
+
+      // Top border
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      // Title
+      const title = " Active Modes ";
+      const titlePad = Math.floor((safeWidth - title.length) / 2);
+      lines.push(
+        this.theme.fg(
+          "border",
+          "─".repeat(titlePad) +
+            title +
+            "─".repeat(safeWidth - titlePad - title.length),
+        ),
+      );
+      lines.push("");
+
+      // Active modes picker list
+      const pickerLines = this.renderActiveModesPicker(safeWidth);
+      for (const line of pickerLines) {
+        lines.push(line);
+      }
+
+      lines.push("");
+      lines.push(this.theme.fg("dim", "─".repeat(safeWidth)));
+      const hint = "Enter / ← → toggle  Esc back";
+      const leftPad = Math.floor((safeWidth - hint.length) / 2);
+      lines.push(this.theme.fg("dim", " ".repeat(leftPad) + hint));
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      return lines;
+    }
+
     // If preset picker is active (depth 1 for themeOverride or presetPicker), render it
-    if (this.depth === 1 && (this.activeSubMenu === "themeOverride" || this.activeSubMenu === "presetPicker")) {
+    if (
+      this.depth === 1 &&
+      (this.activeSubMenu === "themeOverride" ||
+        this.activeSubMenu === "presetPicker")
+    ) {
       const lines: string[] = [];
 
       // Top border
@@ -1101,7 +1745,14 @@ export class SettingsMenu implements Component {
       // Title
       const title = " Theme Preset ";
       const titlePad = Math.floor((safeWidth - title.length) / 2);
-      lines.push(this.theme.fg("border", "─".repeat(titlePad) + title + "─".repeat(safeWidth - titlePad - title.length)));
+      lines.push(
+        this.theme.fg(
+          "border",
+          "─".repeat(titlePad) +
+            title +
+            "─".repeat(safeWidth - titlePad - title.length),
+        ),
+      );
       lines.push("");
 
       // Live preview
@@ -1127,7 +1778,14 @@ export class SettingsMenu implements Component {
     // Title
     const title = " Usage Settings ";
     const titlePad = Math.floor((safeWidth - title.length) / 2);
-    lines.push(this.theme.fg("border", "─".repeat(titlePad) + title + "─".repeat(safeWidth - titlePad - title.length)));
+    lines.push(
+      this.theme.fg(
+        "border",
+        "─".repeat(titlePad) +
+          title +
+          "─".repeat(safeWidth - titlePad - title.length),
+      ),
+    );
 
     // Live preview section
     lines.push(...this.renderPreviewSection(safeWidth));
@@ -1158,10 +1816,32 @@ export class SettingsMenu implements Component {
   // ===========================================================================
 
   handleInput(input: string): void {
+    // Clear any flash warning on input
+    if (this.flashWarning) {
+      this.flashWarning = null;
+      this.tui.requestRender();
+    }
+
     // If color picker is active, delegate to it
     if (this.colorPicker) {
       this.colorPicker.handleInput(input);
       this.tui.requestRender();
+      return;
+    }
+
+    // Prompt close — handle y/n when close prompt is shown
+    if (this.showClosePrompt) {
+      if (input === "y" || input === "Y") {
+        // Switch to the tab's mode
+        const tabMode = this.getCurrentModeTab();
+        if (tabMode && tabMode !== this.config.defaultMode) {
+          this.config.defaultMode = tabMode;
+          saveConfig(this.config);
+        }
+        this.done();
+      } else if (input === "n" || input === "N" || input === "\x1b") {
+        this.done();
+      }
       return;
     }
 
@@ -1170,6 +1850,15 @@ export class SettingsMenu implements Component {
       if (this.depth > 0 || this.activeSettingsList) {
         this.navigateBack();
         return;
+      }
+      // If on a mode tab and the tab's mode differs from the active widget mode, prompt
+      if (this.activeTab > 0) {
+        const tabMode = this.getCurrentModeTab();
+        if (tabMode && tabMode !== this.config.defaultMode) {
+          this.showClosePrompt = true;
+          this.tui.requestRender();
+          return;
+        }
       }
       this.done();
       return;
@@ -1190,7 +1879,8 @@ export class SettingsMenu implements Component {
     }
     if (input === "\x1b[D" || input === "\x1bOD") {
       if (this.depth > 0) return; // Block tab switching in submenus
-      this.activeTab = ((this.activeTab - 1 + TAB_NAMES.length) % TAB_NAMES.length) as TabIndex;
+      this.activeTab = ((this.activeTab - 1 + TAB_NAMES.length) %
+        TAB_NAMES.length) as TabIndex;
       this.globalNavIndex = 0;
       this.selectedIndex = 0;
       this.depth = 0;
@@ -1221,6 +1911,14 @@ export class SettingsMenu implements Component {
 
   private handleGlobalTabInput(input: string): void {
     // ---- Submenu states (depth > 0) ----
+    if (this.depth === 1 && this.activeSubMenu === "displayModePicker") {
+      this.handleDisplayModePickerInput(input);
+      return;
+    }
+    if (this.depth === 1 && this.activeSubMenu === "activeModes") {
+      this.handleActiveModesInput(input);
+      return;
+    }
     if (this.depth === 1 && this.activeSubMenu === "presetPicker") {
       this.handlePresetPickerInput(input, null);
       return;
@@ -1228,46 +1926,82 @@ export class SettingsMenu implements Component {
     if (this.depth === 1 && this.activeSubMenu === "colors") {
       // Colors submenu navigation (Back / Headers / Values)
       if (input === "\x1b[A" || input === "\x1bOA") {
-        if (this.selectedIndex > 0) { this.selectedIndex--; this.tui.requestRender(); }
+        if (this.selectedIndex > 0) {
+          this.selectedIndex--;
+          this.tui.requestRender();
+        }
         return;
       }
       if (input === "\x1b[B" || input === "\x1bOB") {
-        if (this.selectedIndex < 2) { this.selectedIndex++; this.tui.requestRender(); }
+        if (this.selectedIndex < 2) {
+          this.selectedIndex++;
+          this.tui.requestRender();
+        }
         return;
       }
       if (input === "\r" || input === "\n") {
-        if (this.selectedIndex === 0) { this.navigateBack(); }
-        else if (this.selectedIndex === 1) { this.depth = 2; this.selectedIndex = 0; this.activeSubMenu = "colorsHeaders"; this.tui.requestRender(); }
-        else { this.depth = 2; this.selectedIndex = 0; this.activeSubMenu = "colorsValues"; this.tui.requestRender(); }
+        if (this.selectedIndex === 0) {
+          this.navigateBack();
+        } else if (this.selectedIndex === 1) {
+          this.depth = 2;
+          this.selectedIndex = 0;
+          this.activeSubMenu = "colorsHeaders";
+          this.tui.requestRender();
+        } else {
+          this.depth = 2;
+          this.selectedIndex = 0;
+          this.activeSubMenu = "colorsValues";
+          this.tui.requestRender();
+        }
         return;
       }
       return;
     }
-    if (this.depth === 2 && (this.activeSubMenu === "colorsHeaders" || this.activeSubMenu === "colorsValues")) {
-      const elements = this.activeSubMenu === "colorsHeaders" ? HEADER_ELEMENTS : VALUE_ELEMENTS;
+    if (
+      this.depth === 2 &&
+      (this.activeSubMenu === "colorsHeaders" ||
+        this.activeSubMenu === "colorsValues")
+    ) {
+      const elements =
+        this.activeSubMenu === "colorsHeaders"
+          ? HEADER_ELEMENTS
+          : VALUE_ELEMENTS;
       if (input === "\x1b[A" || input === "\x1bOA") {
-        if (this.selectedIndex > 0) { this.selectedIndex--; this.tui.requestRender(); }
+        if (this.selectedIndex > 0) {
+          this.selectedIndex--;
+          this.tui.requestRender();
+        }
         return;
       }
       if (input === "\x1b[B" || input === "\x1bOB") {
-        if (this.selectedIndex < elements.length - 1) { this.selectedIndex++; this.tui.requestRender(); }
+        if (this.selectedIndex < elements.length - 1) {
+          this.selectedIndex++;
+          this.tui.requestRender();
+        }
         return;
       }
       if (input === "\r" || input === "\n") {
         const element = elements[this.selectedIndex];
-        if (element) { this.openColorPicker(element, null); }
+        if (element) {
+          this.openColorPicker(element, null);
+        }
         return;
       }
       if (input === "d") {
         const element = elements[this.selectedIndex];
-        if (element) { this.config.globalColorOverrides[element] = null; saveConfig(this.config); this.invalidatePreview(); this.tui.requestRender(); }
+        if (element) {
+          this.config.globalColorOverrides[element] = null;
+          saveConfig(this.config);
+          this.invalidatePreview();
+          this.tui.requestRender();
+        }
         return;
       }
       return;
     }
 
-    // ---- Depth 0: navigate the 4 items ----
-    // Up/down navigate the 4 items
+    // ---- Depth 0: navigate the 5 items ----
+    // Up/down navigate the 5 items
     if (input === "\x1b[A" || input === "\x1bOA") {
       if (this.globalNavIndex > 0) {
         this.globalNavIndex--;
@@ -1276,28 +2010,31 @@ export class SettingsMenu implements Component {
       return;
     }
     if (input === "\x1b[B" || input === "\x1bOB") {
-      if (this.globalNavIndex < 3) {
+      if (this.globalNavIndex < 4) {
         this.globalNavIndex++;
         this.tui.requestRender();
       }
       return;
     }
 
-    // Left/right cycle values on Display Mode (item 0) and Time Scope (item 1)
+    // Left/right cycle values on Time Scope (item 1)
     if (input === "\x1b[C" || input === "\x1bOC") {
-      this.cycleGlobalItem(1);
+      if (this.globalNavIndex === 1) this.cycleGlobalItem(1);
       return;
     }
     if (input === "\x1b[D" || input === "\x1bOD") {
-      this.cycleGlobalItem(-1);
+      if (this.globalNavIndex === 1) this.cycleGlobalItem(-1);
       return;
     }
 
     // Enter on item
     if (input === "\r" || input === "\n") {
       if (this.globalNavIndex === 0) {
-        // Display Mode — cycle forward
-        this.cycleGlobalItem(1);
+        // Display Mode — open picker submenu
+        this.depth = 1;
+        this.selectedIndex = 0;
+        this.activeSubMenu = "displayModePicker";
+        this.tui.requestRender();
       } else if (this.globalNavIndex === 1) {
         // Time Scope — cycle forward
         this.cycleGlobalItem(1);
@@ -1309,33 +2046,30 @@ export class SettingsMenu implements Component {
         this.previewPreset = THEMED_PRESETS[0] ?? null;
         this.invalidatePreview();
         this.tui.requestRender();
-      } else {
+      } else if (this.globalNavIndex === 3) {
         // Custom Theme Colors
         this.depth = 1;
         this.selectedIndex = 0;
         this.activeSubMenu = "colors";
+        this.tui.requestRender();
+      } else {
+        // Active Modes
+        this.depth = 1;
+        this.selectedIndex = 0;
+        this.activeSubMenu = "activeModes";
         this.tui.requestRender();
       }
       return;
     }
   }
 
-  /** Cycle Display Mode or Time Scope value by direction (+1 or -1). */
+  /** Cycle Time Scope value by direction (+1 or -1). */
   private cycleGlobalItem(dir: number): void {
-    if (this.globalNavIndex === 0) {
-      const modes = DISPLAY_MODES;
-      const idx = modes.indexOf(this.config.defaultMode);
-      const next = modes[((idx + dir) % modes.length + modes.length) % modes.length];
-      if (next && next !== this.config.defaultMode) {
-        this.config.defaultMode = next;
-        saveConfig(this.config);
-        this.invalidatePreview();
-        this.tui.requestRender();
-      }
-    } else if (this.globalNavIndex === 1) {
+    if (this.globalNavIndex === 1) {
       const scopes = TIME_SCOPES;
       const idx = scopes.indexOf(this.config.defaultScope);
-      const next = scopes[((idx + dir) % scopes.length + scopes.length) % scopes.length];
+      const next =
+        scopes[(((idx + dir) % scopes.length) + scopes.length) % scopes.length];
       if (next && next !== this.config.defaultScope) {
         this.config.defaultScope = next;
         saveConfig(this.config);
@@ -1356,7 +2090,7 @@ export class SettingsMenu implements Component {
 
     // ---- Depth 0: Main navigator ----
     if (this.depth === 0) {
-      const itemCount = 3; // Theme Override, Columns, Colors
+      const itemCount = 4; // Enabled, Customize Layout, Theme Preset, Colors
 
       if (input === "\x1b[A" || input === "\x1bOA") {
         if (this.selectedIndex > 0) {
@@ -1373,8 +2107,24 @@ export class SettingsMenu implements Component {
         return;
       }
 
+      // Left/Right toggle Active Widget on index 0
+      if (
+        this.selectedIndex === 0 &&
+        (input === "\x1b[C" ||
+          input === "\x1bOC" ||
+          input === "\x1b[D" ||
+          input === "\x1bOD")
+      ) {
+        this.toggleActiveMode(mode);
+        return;
+      }
+
       if (input === "\r" || input === "\n") {
-        this.openNavigatorItem(mode);
+        if (this.selectedIndex === 0) {
+          this.toggleActiveMode(mode);
+        } else {
+          this.openNavigatorItem(mode);
+        }
         return;
       }
       return;
@@ -1427,8 +2177,15 @@ export class SettingsMenu implements Component {
     }
 
     // ---- Depth 2: Color element list ----
-    if (this.depth === 2 && (this.activeSubMenu === "colorsHeaders" || this.activeSubMenu === "colorsValues")) {
-      const elements = this.activeSubMenu === "colorsHeaders" ? HEADER_ELEMENTS : VALUE_ELEMENTS;
+    if (
+      this.depth === 2 &&
+      (this.activeSubMenu === "colorsHeaders" ||
+        this.activeSubMenu === "colorsValues")
+    ) {
+      const elements =
+        this.activeSubMenu === "colorsHeaders"
+          ? HEADER_ELEMENTS
+          : VALUE_ELEMENTS;
       const maxVisible = Math.min(elements.length, 12);
 
       if (input === "\x1b[A" || input === "\x1bOA") {
@@ -1439,7 +2196,10 @@ export class SettingsMenu implements Component {
         return;
       }
       if (input === "\x1b[B" || input === "\x1bOB") {
-        if (this.selectedIndex < maxVisible - 1 && this.selectedIndex < elements.length - 1) {
+        if (
+          this.selectedIndex < maxVisible - 1 &&
+          this.selectedIndex < elements.length - 1
+        ) {
           this.selectedIndex++;
           this.tui.requestRender();
         }
@@ -1472,14 +2232,19 @@ export class SettingsMenu implements Component {
   private openNavigatorItem(mode: DisplayMode): void {
     switch (this.selectedIndex) {
       case 0: {
-        // Visible Columns
+        // Active Widget — toggle enabled/disabled
+        this.toggleActiveMode(mode);
+        break;
+      }
+      case 1: {
+        // Customize Layout
         this.depth = 1;
         this.activeSubMenu = "columns";
         this.activeSettingsList = this.buildColumnsSettingsList(mode);
         this.tui.requestRender();
         break;
       }
-      case 1: {
+      case 2: {
         // Theme Preset — custom list picker
         this.depth = 1;
         this.selectedIndex = 0;
@@ -1489,7 +2254,7 @@ export class SettingsMenu implements Component {
         this.tui.requestRender();
         break;
       }
-      case 2: {
+      case 3: {
         // Custom Theme Colors
         this.depth = 1;
         this.selectedIndex = 0;
@@ -1498,6 +2263,28 @@ export class SettingsMenu implements Component {
         break;
       }
     }
+  }
+
+  /** Toggle the enabled state for a mode, guarding against disabling the last enabled mode. */
+  private toggleActiveMode(mode: DisplayMode): void {
+    const current = this.config.enabledModes[mode] ?? true;
+    if (current) {
+      // Disabling — check if this is the last enabled mode
+      const enabledCount = (
+        ["summary", "compact", "Per Model", "expanded"] as DisplayMode[]
+      ).filter((m) =>
+        m === mode ? true : (this.config.enabledModes[m] ?? true),
+      ).length;
+      if (enabledCount <= 1) {
+        this.flashWarning = "At least one mode must remain enabled";
+        this.tui.requestRender();
+        return;
+      }
+    }
+    this.config.enabledModes[mode] = !current;
+    saveConfig(this.config);
+    this.invalidatePreview();
+    this.tui.requestRender();
   }
 
   // ===========================================================================

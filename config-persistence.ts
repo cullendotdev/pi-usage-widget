@@ -14,7 +14,12 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
-import type { UsageWidgetConfig, DisplayMode, ModeColumnConfig, ColorOverrides } from "./types.js";
+import type {
+  UsageWidgetConfig,
+  DisplayMode,
+  ModeColumnConfig,
+  ColorOverrides,
+} from "./types.js";
 
 // =============================================================================
 // Config path
@@ -24,7 +29,8 @@ function getConfigPath(): string {
   if (process.env.PI_USAGE_CONFIG_PATH) {
     return process.env.PI_USAGE_CONFIG_PATH;
   }
-  const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+  const agentDir =
+    process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
   return join(agentDir, "pi-usage-widget-settings.json");
 }
 
@@ -45,7 +51,8 @@ function defaultModeColumnConfig(): ModeColumnConfig {
     cache: true,
     showTotals: true,
     showHeaders: true,
-    showLines: true,
+    showHeaderLine: true,
+    showFooterLine: true,
   };
 }
 
@@ -76,7 +83,13 @@ function nullColorOverrides(): ColorOverrides {
   };
 }
 
-const ALL_MODES: DisplayMode[] = ["summary", "compact", "per-model", "expanded", "hidden"];
+const ALL_MODES: DisplayMode[] = [
+  "summary",
+  "compact",
+  "Per Model",
+  "expanded",
+  "hidden",
+];
 
 export function getDefaultConfig(): UsageWidgetConfig {
   const modes = {} as Record<DisplayMode, ModeColumnConfig>;
@@ -99,6 +112,11 @@ export function getDefaultConfig(): UsageWidgetConfig {
     perModeThemedPreset[mode] = null;
   }
 
+  const enabledModes = {} as Record<DisplayMode, boolean>;
+  for (const mode of ALL_MODES) {
+    enabledModes[mode] = true;
+  }
+
   return {
     defaultMode: "summary",
     defaultScope: "today",
@@ -112,6 +130,7 @@ export function getDefaultConfig(): UsageWidgetConfig {
       paddingY: 0,
     },
     modes,
+    enabledModes,
     headerLine: {
       show: true,
       color: null,
@@ -138,7 +157,10 @@ function isObject(item: unknown): item is Record<string, unknown> {
  * base values. null/undefined values in `partial` mean "use default" and
  * are not merged. Nested objects are merged recursively.
  */
-export function mergeConfig(base: UsageWidgetConfig, partial: Partial<UsageWidgetConfig>): UsageWidgetConfig {
+export function mergeConfig(
+  base: UsageWidgetConfig,
+  partial: Partial<UsageWidgetConfig>,
+): UsageWidgetConfig {
   const result = { ...base };
 
   for (const key of Object.keys(partial) as (keyof UsageWidgetConfig)[]) {
@@ -147,7 +169,10 @@ export function mergeConfig(base: UsageWidgetConfig, partial: Partial<UsageWidge
 
     if (isObject(partialVal) && isObject(result[key])) {
       // Deep merge nested objects
-      result[key] = deepMergeObjects(result[key] as Record<string, unknown>, partialVal as Record<string, unknown>) as never;
+      result[key] = deepMergeObjects(
+        result[key] as Record<string, unknown>,
+        partialVal as Record<string, unknown>,
+      ) as never;
     } else {
       result[key] = partialVal as never;
     }
@@ -156,7 +181,10 @@ export function mergeConfig(base: UsageWidgetConfig, partial: Partial<UsageWidge
   return result;
 }
 
-function deepMergeObjects(base: Record<string, unknown>, partial: Record<string, unknown>): Record<string, unknown> {
+function deepMergeObjects(
+  base: Record<string, unknown>,
+  partial: Record<string, unknown>,
+): Record<string, unknown> {
   const result = { ...base };
 
   for (const key of Object.keys(partial)) {
@@ -164,7 +192,10 @@ function deepMergeObjects(base: Record<string, unknown>, partial: Record<string,
     if (partialVal === undefined || partialVal === null) continue;
 
     if (isObject(partialVal) && isObject(result[key])) {
-      result[key] = deepMergeObjects(result[key] as Record<string, unknown>, partialVal as Record<string, unknown>);
+      result[key] = deepMergeObjects(
+        result[key] as Record<string, unknown>,
+        partialVal as Record<string, unknown>,
+      );
     } else {
       result[key] = partialVal;
     }

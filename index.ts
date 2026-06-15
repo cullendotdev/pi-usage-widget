@@ -3,10 +3,13 @@
  *
  * Shows an inline widget with usage stats grouped by provider.
  * Sessions persist configuration across restarts.
- * Ctrl+Alt+U cycles display modes, Alt+U cycles time scopes.
+ * Ctrl+Alt+U cycles widget display modes, Alt+U cycles time scopes.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { CancellableLoader, Container, Spacer } from "@earendil-works/pi-tui";
 import { getUsageData } from "./data-collection.js";
@@ -26,46 +29,59 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       if (!ctx.hasUI) return;
 
-      const data = await ctx.ui.custom<UsageData | null>((tui, theme, _kb, done) => {
-        const loader = new CancellableLoader(
-          tui,
-          (s: string) => theme.fg("accent", s),
-          (s: string) => theme.fg("muted", s),
-          "Loading Usage..."
-        );
-        let finished = false;
-        const finish = (value: UsageData | null) => {
-          if (finished) return;
-          finished = true;
-          loader.dispose();
-          done(value);
-        };
+      const data = await ctx.ui.custom<UsageData | null>(
+        (tui, theme, _kb, done) => {
+          const loader = new CancellableLoader(
+            tui,
+            (s: string) => theme.fg("accent", s),
+            (s: string) => theme.fg("muted", s),
+            "Loading Usage...",
+          );
+          let finished = false;
+          const finish = (value: UsageData | null) => {
+            if (finished) return;
+            finished = true;
+            loader.dispose();
+            done(value);
+          };
 
-        loader.onAbort = () => finish(null);
+          loader.onAbort = () => finish(null);
 
-        getUsageData(loader.signal)
-          .then((d) => finish(d))
-          .catch(() => finish(null));
+          getUsageData(loader.signal)
+            .then((d) => finish(d))
+            .catch(() => finish(null));
 
-        return loader;
-      });
+          return loader;
+        },
+      );
 
       if (!data) return;
 
       await ctx.ui.custom<void>((tui, theme, _kb, done) => {
         const container = new Container();
         container.addChild(new Spacer(1));
-        container.addChild(new DynamicBorder((s: string) => theme.fg("border", s)));
+        container.addChild(
+          new DynamicBorder((s: string) => theme.fg("border", s)),
+        );
         container.addChild(new Spacer(1));
 
-        const usage = new UsageComponent(theme, data, () => tui.requestRender(), () => done());
+        const usage = new UsageComponent(
+          theme,
+          data,
+          () => tui.requestRender(),
+          () => done(),
+        );
 
         return {
           render: (w: number) => {
-            const borderLines = container.render(w).map((l) => l.slice(0, Math.max(w, 0)));
+            const borderLines = container
+              .render(w)
+              .map((l) => l.slice(0, Math.max(w, 0)));
             const usageLines = usage.render(w);
             const bottomBorder = theme.fg("border", "\u2500".repeat(w));
-            return [...borderLines, ...usageLines, "", bottomBorder].map((l) => l.slice(0, Math.max(w, 0)));
+            return [...borderLines, ...usageLines, "", bottomBorder].map((l) =>
+              l.slice(0, Math.max(w, 0)),
+            );
           },
           invalidate: () => container.invalidate(),
           handleInput: (input: string) => usage.handleInput(input),
@@ -92,7 +108,10 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function updateWidgetData(widget: UsageWidget, signal: AbortSignal): Promise<void> {
+  async function updateWidgetData(
+    widget: UsageWidget,
+    signal: AbortSignal,
+  ): Promise<void> {
     const data = await getUsageData(signal);
     if (!signal.aborted) widget.setData(data);
   }
@@ -123,15 +142,27 @@ export default function (pi: ExtensionAPI) {
   }
 
   function stopPeriodicRefresh(): void {
-    if (periodicTimer) { clearInterval(periodicTimer); periodicTimer = null; }
+    if (periodicTimer) {
+      clearInterval(periodicTimer);
+      periodicTimer = null;
+    }
   }
 
   function cleanupSession(): void {
-    if (unsubMessageEnd) { unsubMessageEnd(); unsubMessageEnd = null; }
+    if (unsubMessageEnd) {
+      unsubMessageEnd();
+      unsubMessageEnd = null;
+    }
     cancelPendingUpdate();
     stopPeriodicRefresh();
-    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
-    if (currentWidget) { currentWidget.dispose(); currentWidget = null; }
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    if (currentWidget) {
+      currentWidget.dispose();
+      currentWidget = null;
+    }
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -148,16 +179,22 @@ export default function (pi: ExtensionAPI) {
     currentAbortController = null;
 
     const placement = "aboveEditor";
-    ctx.ui.setWidget("usage-stats-widget", (tui) => {
-      widget.setTui(tui);
-      return {
-        render: (w: number) => widget.render(w),
-        invalidate: () => widget.invalidate(),
-      };
-    }, { placement });
+    ctx.ui.setWidget(
+      "usage-stats-widget",
+      (tui) => {
+        widget.setTui(tui);
+        return {
+          render: (w: number) => widget.render(w),
+          invalidate: () => widget.invalidate(),
+        };
+      },
+      { placement },
+    );
 
     startPeriodicRefresh(widget);
-    unsubMessageEnd = pi.on("message_end", () => scheduleDebouncedRefresh(widget));
+    unsubMessageEnd = pi.on("message_end", () =>
+      scheduleDebouncedRefresh(widget),
+    );
   });
 
   pi.on("session_switch", (_event, ctx) => {

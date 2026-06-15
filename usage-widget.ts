@@ -9,15 +9,25 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { renderWidget } from "./widget-render.js";
 import { getDefaultConfig, saveConfig } from "./config-persistence.js";
-import type { UsageWidgetConfig, DisplayMode, TimeScope, UsageData } from "./types.js";
+import type {
+  UsageWidgetConfig,
+  DisplayMode,
+  TimeScope,
+  UsageData,
+} from "./types.js";
 
 // Legacy display mode names for backward compatibility
-type DisplayModeLegacy = "summary" | "compact" | "detailed-collapsed" | "detailed-expanded" | "hidden";
+type DisplayModeLegacy =
+  | "summary"
+  | "compact"
+  | "detailed-collapsed"
+  | "detailed-expanded"
+  | "hidden";
 
 const DISPLAY_MODE_ORDER: DisplayModeLegacy[] = [
   "summary",
   "compact",
-  "per-model",
+  "Per Model",
   "expanded",
   "hidden",
 ] as DisplayModeLegacy[];
@@ -39,6 +49,8 @@ export class UsageWidget {
   private theme: Theme;
   private tui: import("@earendil-works/pi-tui").TUI | null = null;
   private config: UsageWidgetConfig;
+  /** Tracks whether the "hidden" mode flash message has been shown. Reset on mode change away from hidden. */
+  private _hiddenMessageShown = false;
 
   constructor(theme: Theme, config?: UsageWidgetConfig) {
     this.theme = theme;
@@ -84,8 +96,14 @@ export class UsageWidget {
   dispose(): void {}
 
   cycleMode(): void {
-    const idx = DISPLAY_MODE_ORDER.indexOf(this.displayMode);
-    const next = DISPLAY_MODE_ORDER[(idx + 1) % DISPLAY_MODE_ORDER.length]!;
+    // Build a cycle list of only enabled modes
+    const enabledOrder = DISPLAY_MODE_ORDER.filter(
+      (m) => this.config.enabledModes[m as DisplayMode] ?? true,
+    );
+    // Safety net: if all modes are disabled, fall back to full order
+    const order = enabledOrder.length > 0 ? enabledOrder : DISPLAY_MODE_ORDER;
+    const idx = order.indexOf(this.displayMode);
+    const next = order[(idx + 1) % order.length]!;
     this.setMode(next);
   }
 
@@ -105,6 +123,23 @@ export class UsageWidget {
     if (modeStr === "detailed-collapsed") modeStr = "compact";
     if (modeStr === "detailed-expanded") modeStr = "expanded";
 
-    return renderWidget(this.config, this.theme, this.usageData, width, modeStr, this.scope);
+    // Hidden mode: flash message once, then stay hidden
+    if (modeStr === "hidden") {
+      if (this._hiddenMessageShown) return [];
+      this._hiddenMessageShown = true;
+      return [this.theme.fg("dim", "Widget hidden — press Ctrl+Alt+U to show")];
+    }
+
+    // Reset flash flag when not in hidden mode
+    this._hiddenMessageShown = false;
+
+    return renderWidget(
+      this.config,
+      this.theme,
+      this.usageData,
+      width,
+      modeStr,
+      this.scope,
+    );
   }
 }

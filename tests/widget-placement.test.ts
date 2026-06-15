@@ -66,8 +66,14 @@ describe("mergeConfig with placement", () => {
     assert.equal(modified.placement.paddingY, 3);
 
     // Simulate save → load merge
-    const merged = mergeConfig(defaultConfig, { placement: modified.placement });
-    assert.deepEqual(merged.placement, { mode: "detached", paddingX: 5, paddingY: 3 });
+    const merged = mergeConfig(defaultConfig, {
+      placement: modified.placement,
+    });
+    assert.deepEqual(merged.placement, {
+      mode: "detached",
+      paddingX: 5,
+      paddingY: 3,
+    });
   });
 });
 
@@ -110,7 +116,11 @@ function mockUsageData(scopeStats?: any) {
   };
 }
 
-function configWithPlacement(mode: "header" | "footer" | "detached", paddingX = 0, paddingY = 0): UsageWidgetConfig {
+function configWithPlacement(
+  mode: "header" | "footer" | "detached",
+  paddingX = 0,
+  paddingY = 0,
+): UsageWidgetConfig {
   return {
     ...defaultConfig,
     placement: { mode, paddingX, paddingY },
@@ -129,7 +139,10 @@ describe("Render engine — placement awareness", () => {
   it("renderWidget function exists and is callable", async () => {
     // Test that the module can be imported (validation check)
     const mod = await import("../widget-render.js");
-    assert.ok(typeof mod.renderWidget === "function", "renderWidget should be a function");
+    assert.ok(
+      typeof mod.renderWidget === "function",
+      "renderWidget should be a function",
+    );
     renderWidget = mod.renderWidget;
   });
 
@@ -141,7 +154,11 @@ describe("Render engine — placement awareness", () => {
     const config = configWithPlacement("detached", 5, 5);
     const data = mockUsageData();
     const result = renderWidget(config, mockTheme, data, 80, "hidden", "today");
-    assert.deepEqual(result, [], "hidden mode should return empty array");
+    assert.deepStrictEqual(
+      result,
+      [],
+      "hidden mode returns empty (flash handled by UsageWidget)",
+    );
   });
 
   it("adds paddingY blank lines for detached mode with no data", async () => {
@@ -151,17 +168,36 @@ describe("Render engine — placement awareness", () => {
     }
     const config = configWithPlacement("detached", 0, 3);
     const data = mockUsageData();
-    const result = renderWidget(config, mockTheme, data, 80, "summary", "today");
+    const result = renderWidget(
+      config,
+      mockTheme,
+      data,
+      80,
+      "summary",
+      "today",
+    );
 
     // Should have "Usage: --- (today)" line + padding
     // Count empty lines at the start
     const firstNonEmpty = result.findIndex((line: string) => line !== "");
-    assert.ok(firstNonEmpty >= 3, `Expected at least 3 empty lines for paddingY=3, got ${firstNonEmpty}`);
+    assert.ok(
+      firstNonEmpty >= 3,
+      `Expected at least 3 empty lines for paddingY=3, got ${firstNonEmpty}`,
+    );
 
     // Should also have trailing empty lines
-    const lastNonEmpty = result.length - 1 - result.slice().reverse().findIndex((line: string) => line !== "");
+    const lastNonEmpty =
+      result.length -
+      1 -
+      result
+        .slice()
+        .reverse()
+        .findIndex((line: string) => line !== "");
     const trailingEmpty = result.length - 1 - lastNonEmpty;
-    assert.ok(trailingEmpty >= 3, `Expected at least 3 trailing empty lines for paddingY=3, got ${trailingEmpty}`);
+    assert.ok(
+      trailingEmpty >= 3,
+      `Expected at least 3 trailing empty lines for paddingY=3, got ${trailingEmpty}`,
+    );
   });
 
   it("does NOT add padding for header mode", async () => {
@@ -171,11 +207,21 @@ describe("Render engine — placement awareness", () => {
     }
     const config = configWithPlacement("header", 0, 0);
     const data = mockUsageData();
-    const result = renderWidget(config, mockTheme, data, 80, "summary", "today");
+    const result = renderWidget(
+      config,
+      mockTheme,
+      data,
+      80,
+      "summary",
+      "today",
+    );
 
     // Header mode should NOT have leading empty lines from padding
     const firstNonEmpty = result.findIndex((line: string) => line !== "");
-    assert.ok(firstNonEmpty <= 0, "Header mode should have no leading padding lines");
+    assert.ok(
+      firstNonEmpty <= 0,
+      "Header mode should have no leading padding lines",
+    );
   });
 
   it("does NOT add padding for footer mode", async () => {
@@ -185,10 +231,20 @@ describe("Render engine — placement awareness", () => {
     }
     const config = configWithPlacement("footer", 0, 0);
     const data = mockUsageData();
-    const result = renderWidget(config, mockTheme, data, 80, "summary", "today");
+    const result = renderWidget(
+      config,
+      mockTheme,
+      data,
+      80,
+      "summary",
+      "today",
+    );
 
     const firstNonEmpty = result.findIndex((line: string) => line !== "");
-    assert.ok(firstNonEmpty <= 0, "Footer mode should have no leading padding lines");
+    assert.ok(
+      firstNonEmpty <= 0,
+      "Footer mode should have no leading padding lines",
+    );
   });
 
   it("adds horizontal padding (paddingX) by indenting lines in detached mode", async () => {
@@ -198,7 +254,14 @@ describe("Render engine — placement awareness", () => {
     }
     const config = configWithPlacement("detached", 5, 0);
     const data = mockUsageData();
-    const result = renderWidget(config, mockTheme, data, 80, "summary", "today");
+    const result = renderWidget(
+      config,
+      mockTheme,
+      data,
+      80,
+      "summary",
+      "today",
+    );
 
     // Find a non-empty content line (not a blank padding line)
     const contentLines = result.filter((line: string) => line !== "");
@@ -207,7 +270,7 @@ describe("Render engine — placement awareness", () => {
       // Should start with 5 spaces
       assert.ok(
         contentLine.startsWith("     "),
-        `Content line should be indented by 5 spaces for paddingX=5, got: "${contentLine.slice(0, 20)}..."`
+        `Content line should be indented by 5 spaces for paddingX=5, got: "${contentLine.slice(0, 20)}..."`,
       );
     }
   });
@@ -220,7 +283,14 @@ describe("Render engine — placement awareness", () => {
     const config = configWithPlacement("detached", 0, 0);
     const data = mockUsageData();
     // Should not crash
-    const result = renderWidget(config, mockTheme, data, 80, "summary", "today");
+    const result = renderWidget(
+      config,
+      mockTheme,
+      data,
+      80,
+      "summary",
+      "today",
+    );
     assert.ok(Array.isArray(result), "Result should always be an array");
   });
 
@@ -229,15 +299,22 @@ describe("Render engine — placement awareness", () => {
       const mod = await import("../widget-render.js");
       renderWidget = mod.renderWidget;
     }
-    const modes = ["summary", "compact", "per-model", "expanded"] as const;
+    const modes = ["summary", "compact", "Per Model", "expanded"] as const;
     const placements = ["header", "footer", "detached"] as const;
 
     for (const mode of modes) {
       for (const placement of placements) {
-        const config = configWithPlacement(placement, placement === "detached" ? 2 : 0, placement === "detached" ? 1 : 0);
+        const config = configWithPlacement(
+          placement,
+          placement === "detached" ? 2 : 0,
+          placement === "detached" ? 1 : 0,
+        );
         const data = mockUsageData();
         const result = renderWidget(config, mockTheme, data, 80, mode, "today");
-        assert.ok(Array.isArray(result), `renderWidget should return array for mode=${mode}, placement=${placement}`);
+        assert.ok(
+          Array.isArray(result),
+          `renderWidget should return array for mode=${mode}, placement=${placement}`,
+        );
         assert.ok(result.length >= 0, "Result should have non-negative length");
       }
     }

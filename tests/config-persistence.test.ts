@@ -14,7 +14,11 @@ import { tmpdir } from "node:os";
 // For now, let's test the default config generation and merge logic directly,
 // which are the core behaviors we care about.
 
-import { getDefaultConfig, mergeConfig, type UsageWidgetConfig } from "../config-persistence.js";
+import {
+  getDefaultConfig,
+  mergeConfig,
+  type UsageWidgetConfig,
+} from "../config-persistence.js";
 
 const defaultConfig: UsageWidgetConfig = getDefaultConfig();
 
@@ -50,9 +54,18 @@ describe("getDefaultConfig", () => {
   });
 
   it("has all five display modes configured", () => {
-    const modes = ["summary", "compact", "per-model", "expanded", "hidden"] as const;
+    const modes = [
+      "summary",
+      "compact",
+      "Per Model",
+      "expanded",
+      "hidden",
+    ] as const;
     for (const mode of modes) {
-      assert.ok(defaultConfig.modes[mode] !== undefined, `Mode '${mode}' should exist`);
+      assert.ok(
+        defaultConfig.modes[mode] !== undefined,
+        `Mode '${mode}' should exist`,
+      );
     }
   });
 
@@ -62,7 +75,7 @@ describe("getDefaultConfig", () => {
 
   it("compact, per-model, and expanded modes have showTotals true", () => {
     assert.equal(defaultConfig.modes.compact.showTotals, true);
-    assert.equal(defaultConfig.modes["per-model"].showTotals, true);
+    assert.equal(defaultConfig.modes["Per Model"].showTotals, true);
     assert.equal(defaultConfig.modes.expanded.showTotals, true);
   });
 
@@ -87,7 +100,13 @@ describe("getDefaultConfig", () => {
   });
 
   it("per-mode color overrides have all null entries for each mode", () => {
-    for (const mode of ["summary", "compact", "per-model", "expanded", "hidden"] as const) {
+    for (const mode of [
+      "summary",
+      "compact",
+      "Per Model",
+      "expanded",
+      "hidden",
+    ] as const) {
       const overrides = defaultConfig.perModeColorOverrides[mode];
       assert.ok(overrides !== undefined, `Mode '${mode}' overrides missing`);
       assert.equal(overrides.title, null);
@@ -164,7 +183,10 @@ describe("mergeConfig", () => {
       headerLine: { show: false },
     });
     assert.equal(result.headerLine.show, false);
-    assert.equal(result.headerLine.character, defaultConfig.headerLine.character);
+    assert.equal(
+      result.headerLine.character,
+      defaultConfig.headerLine.character,
+    );
     assert.equal(result.headerLine.color, defaultConfig.headerLine.color);
   });
 
@@ -191,7 +213,10 @@ let tempConfigPath: string;
 
 beforeEach(async () => {
   // Create a unique temp path per test
-  const testDir = join(tmpdir(), `pi-usage-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const testDir = join(
+    tmpdir(),
+    `pi-usage-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   await mkdir(testDir, { recursive: true });
   tempConfigPath = join(testDir, "pi-usage-widget-settings.json");
   process.env.PI_USAGE_CONFIG_PATH = tempConfigPath;
@@ -199,7 +224,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   delete process.env.PI_USAGE_CONFIG_PATH;
-  try { await unlink(tempConfigPath); } catch { /* ok */ }
+  try {
+    await unlink(tempConfigPath);
+  } catch {
+    /* ok */
+  }
 });
 
 // We need to import loadConfig/saveConfig after setting the env var
@@ -220,7 +249,10 @@ describe("loadConfig", () => {
   });
 
   it("loads a partial config from file and merges with defaults", async () => {
-    await writeFile(tempConfigPath, JSON.stringify({ defaultMode: "expanded" }));
+    await writeFile(
+      tempConfigPath,
+      JSON.stringify({ defaultMode: "expanded" }),
+    );
     const { loadConfig } = await reloadPersistence();
     const config = loadConfig();
     assert.equal(config.defaultMode, "expanded");
@@ -294,8 +326,8 @@ describe("saveConfig", () => {
           msgs: false,
           showTotals: false,
         },
-        "per-model": {
-          ...defaultConfig.modes["per-model"],
+        "Per Model": {
+          ...defaultConfig.modes["Per Model"],
           provider: true,
           model: true,
           cost: true,
@@ -309,7 +341,7 @@ describe("saveConfig", () => {
     assert.equal(loaded.modes.compact.sessions, false);
     assert.equal(loaded.modes.compact.msgs, false);
     assert.equal(loaded.modes.compact.showTotals, false);
-    assert.equal(loaded.modes["per-model"].tokens, false);
-    assert.equal(loaded.modes["per-model"].cost, true);
+    assert.equal(loaded.modes["Per Model"].tokens, false);
+    assert.equal(loaded.modes["Per Model"].cost, true);
   });
 });

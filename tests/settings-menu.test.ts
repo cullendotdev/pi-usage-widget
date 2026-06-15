@@ -20,8 +20,13 @@ describe("createMockUsageData", () => {
     const data = createMockUsageData();
 
     const expectedScopes = [
-      "lastHour", "today", "yesterday", "thisWeek",
-      "lastWeek", "thisMonth", "allTime",
+      "lastHour",
+      "today",
+      "yesterday",
+      "thisWeek",
+      "lastWeek",
+      "thisMonth",
+      "allTime",
     ];
 
     for (const scope of expectedScopes) {
@@ -36,12 +41,30 @@ describe("createMockUsageData", () => {
     const scopes = Object.keys(data) as Array<keyof typeof data>;
     for (const scope of scopes) {
       const stats = data[scope];
-      assert.ok(stats.providers instanceof Map, `${scope}.providers should be a Map`);
-      assert.ok(typeof stats.totals === "object", `${scope}.totals should be an object`);
-      assert.ok(typeof stats.totals.messages === "number", `${scope}.totals.messages should be a number`);
-      assert.ok(typeof stats.totals.cost === "number", `${scope}.totals.cost should be a number`);
-      assert.ok(typeof stats.totals.tokens === "object", `${scope}.totals.tokens should be an object`);
-      assert.ok(Array.isArray(stats.insights.insights), `${scope}.insights.insights should be an array`);
+      assert.ok(
+        stats.providers instanceof Map,
+        `${scope}.providers should be a Map`,
+      );
+      assert.ok(
+        typeof stats.totals === "object",
+        `${scope}.totals should be an object`,
+      );
+      assert.ok(
+        typeof stats.totals.messages === "number",
+        `${scope}.totals.messages should be a number`,
+      );
+      assert.ok(
+        typeof stats.totals.cost === "number",
+        `${scope}.totals.cost should be a number`,
+      );
+      assert.ok(
+        typeof stats.totals.tokens === "object",
+        `${scope}.totals.tokens should be an object`,
+      );
+      assert.ok(
+        Array.isArray(stats.insights.insights),
+        `${scope}.insights.insights should be an array`,
+      );
     }
   });
 
@@ -54,7 +77,10 @@ describe("createMockUsageData", () => {
     assert.ok(today.totals.cost > 0, "today should have cost");
     assert.ok(today.totals.tokens.total > 0, "today should have tokens");
     assert.ok(today.totals.tokens.input > 0, "today should have input tokens");
-    assert.ok(today.totals.tokens.output > 0, "today should have output tokens");
+    assert.ok(
+      today.totals.tokens.output > 0,
+      "today should have output tokens",
+    );
     assert.ok(today.totals.sessions > 0, "today should have sessions");
   });
 
@@ -74,9 +100,18 @@ describe("createMockUsageData", () => {
     const data = createMockUsageData();
 
     const today = data.today;
-    assert.ok(today.providers.get("google")!.models.size >= 2, "google should have >= 2 models");
-    assert.ok(today.providers.get("anthropic")!.models.size >= 2, "anthropic should have >= 2 models");
-    assert.ok(today.providers.get("openai")!.models.size >= 2, "openai should have >= 2 models");
+    assert.ok(
+      today.providers.get("google")!.models.size >= 2,
+      "google should have >= 2 models",
+    );
+    assert.ok(
+      today.providers.get("anthropic")!.models.size >= 2,
+      "anthropic should have >= 2 models",
+    );
+    assert.ok(
+      today.providers.get("openai")!.models.size >= 2,
+      "openai should have >= 2 models",
+    );
   });
 
   it("scopes have different totals (scope variety)", async () => {
@@ -86,11 +121,11 @@ describe("createMockUsageData", () => {
     // lastHour should be smallest, allTime largest
     assert.ok(
       data.lastHour.totals.messages < data.today.totals.messages,
-      "lastHour should have fewer messages than today"
+      "lastHour should have fewer messages than today",
     );
     assert.ok(
       data.today.totals.messages < data.allTime.totals.messages,
-      "today should have fewer messages than allTime"
+      "today should have fewer messages than allTime",
     );
   });
 
@@ -116,13 +151,19 @@ describe("Tab constants", () => {
     // (they're private), we verify via behavioral tests below.
 
     // This test documents the expected contract.
-    const expectedTabs = ["Summary", "Compact", "Per-Model", "Expanded", "Global"];
+    const expectedTabs = [
+      "Summary",
+      "Compact",
+      "Per Model",
+      "Expanded",
+      "Global",
+    ];
 
     assert.equal(expectedTabs.length, 5);
     assert.ok(expectedTabs.includes("Global"), "Global tab must exist");
     assert.ok(expectedTabs.includes("Summary"), "Summary tab must exist");
     assert.ok(expectedTabs.includes("Compact"), "Compact tab must exist");
-    assert.ok(expectedTabs.includes("Per-Model"), "Per-Model tab must exist");
+    assert.ok(expectedTabs.includes("Per Model"), "Per-Model tab must exist");
     assert.ok(expectedTabs.includes("Expanded"), "Expanded tab must exist");
   });
 
@@ -147,7 +188,9 @@ describe("SettingsMenu config lifecycle", () => {
     process.env.PI_USAGE_CONFIG_PATH = configPath;
 
     // Ensure clean state
-    try { await unlink(configPath); } catch {}
+    try {
+      await unlink(configPath);
+    } catch {}
 
     // Clear require cache so modules re-read env
     delete require.cache[require.resolve("../config-persistence.js")];
@@ -159,7 +202,9 @@ describe("SettingsMenu config lifecycle", () => {
     } else {
       delete process.env.PI_USAGE_CONFIG_PATH;
     }
-    try { await unlink(configPath); } catch {}
+    try {
+      await unlink(configPath);
+    } catch {}
   });
 
   it("config loads defaults when no file exists", () => {
@@ -177,14 +222,17 @@ describe("SettingsMenu config lifecycle", () => {
     const labelMap: Record<string, string> = {
       summary: "Summary",
       compact: "Compact",
-      "per-model": "Per Model",
+      "Per Model": "Per Model",
       expanded: "Expanded",
       hidden: "Hidden",
     };
 
     const defaults = getDefaultConfig();
     assert.equal(defaults.defaultMode, "summary");
-    assert.ok(labelMap[defaults.defaultMode] !== undefined, "defaultMode should have a label");
+    assert.ok(
+      labelMap[defaults.defaultMode] !== undefined,
+      "defaultMode should have a label",
+    );
   });
 
   it("defaultScope labels match expected values", () => {
@@ -205,9 +253,16 @@ describe("SettingsMenu config lifecycle", () => {
   });
 
   it("changing default mode persists across loadConfig calls", () => {
-    const { getDefaultConfig, mergeConfig, saveConfig, loadConfig } = require("../config-persistence.js");
+    const {
+      getDefaultConfig,
+      mergeConfig,
+      saveConfig,
+      loadConfig,
+    } = require("../config-persistence.js");
 
-    const modified = mergeConfig(getDefaultConfig(), { defaultMode: "expanded" });
+    const modified = mergeConfig(getDefaultConfig(), {
+      defaultMode: "expanded",
+    });
     assert.equal(modified.defaultMode, "expanded");
 
     saveConfig(modified);
@@ -221,9 +276,16 @@ describe("SettingsMenu config lifecycle", () => {
   });
 
   it("changing themed preset persists across loadConfig calls", () => {
-    const { getDefaultConfig, mergeConfig, saveConfig, loadConfig } = require("../config-persistence.js");
+    const {
+      getDefaultConfig,
+      mergeConfig,
+      saveConfig,
+      loadConfig,
+    } = require("../config-persistence.js");
 
-    const modified = mergeConfig(getDefaultConfig(), { themedPreset: "dracula" } as any);
+    const modified = mergeConfig(getDefaultConfig(), {
+      themedPreset: "dracula",
+    } as any);
     assert.equal(modified.themedPreset, "dracula");
 
     saveConfig(modified);
@@ -243,7 +305,10 @@ describe("SettingsMenu config lifecycle", () => {
 describe("SettingsMenu class structure", () => {
   it("SettingsMenu is a class export", async () => {
     const mod = await import("../settings-menu.js");
-    assert.ok(typeof mod.SettingsMenu === "function", "SettingsMenu should be a class/function");
+    assert.ok(
+      typeof mod.SettingsMenu === "function",
+      "SettingsMenu should be a class/function",
+    );
   });
 
   it("SettingsMenu prototype has render, handleInput, dispose methods", async () => {
@@ -251,7 +316,10 @@ describe("SettingsMenu class structure", () => {
     const proto = mod.SettingsMenu.prototype;
 
     assert.ok(typeof proto.render === "function", "should have render()");
-    assert.ok(typeof proto.handleInput === "function", "should have handleInput()");
+    assert.ok(
+      typeof proto.handleInput === "function",
+      "should have handleInput()",
+    );
     assert.ok(typeof proto.dispose === "function", "should have dispose()");
   });
 });
@@ -262,34 +330,52 @@ describe("SettingsMenu class structure", () => {
 
 describe("Global tab setting values", () => {
   it("display modes have exactly 5 values (not including hidden)", () => {
-    const displayModes = ["summary", "compact", "per-model", "expanded"];
+    const displayModes = ["summary", "compact", "Per Model", "expanded"];
     // hidden is a valid DisplayMode but not selectable as default
     assert.equal(displayModes.length, 4);
     assert.ok(displayModes.includes("summary"));
     assert.ok(displayModes.includes("compact"));
-    assert.ok(displayModes.includes("per-model"));
+    assert.ok(displayModes.includes("Per Model"));
     assert.ok(displayModes.includes("expanded"));
   });
 
   it("time scopes have exactly 7 values", () => {
     const timeScopes = [
-      "lastHour", "today", "yesterday",
-      "thisWeek", "lastWeek", "thisMonth", "allTime",
+      "lastHour",
+      "today",
+      "yesterday",
+      "thisWeek",
+      "lastWeek",
+      "thisMonth",
+      "allTime",
     ];
     assert.equal(timeScopes.length, 7);
   });
 
   it("themed presets have exactly 7 values", () => {
     const presets = [
-      "default", "tokyo-night", "dracula",
-      "gruvbox", "nord", "catppuccin", "monokai",
+      "default",
+      "tokyo-night",
+      "dracula",
+      "gruvbox",
+      "nord",
+      "catppuccin",
+      "monokai",
     ];
     assert.equal(presets.length, 7);
   });
 
   it("all presets exist in color-engine", async () => {
     const { colorPresets } = await import("../color-engine.js");
-    const presetNames = ["default", "tokyo-night", "dracula", "gruvbox", "nord", "catppuccin", "monokai"];
+    const presetNames = [
+      "default",
+      "tokyo-night",
+      "dracula",
+      "gruvbox",
+      "nord",
+      "catppuccin",
+      "monokai",
+    ];
     for (const name of presetNames) {
       assert.ok(colorPresets[name] !== undefined, `Missing preset: ${name}`);
     }
@@ -320,16 +406,26 @@ describe("Global tab — SettingsList items", () => {
 
   it("defaultScope values include all time scopes", () => {
     const values = [
-      "Last Hour", "Today", "Yesterday", "This Week",
-      "Last Week", "This Month", "All Time",
+      "Last Hour",
+      "Today",
+      "Yesterday",
+      "This Week",
+      "Last Week",
+      "This Month",
+      "All Time",
     ];
     assert.equal(values.length, 7);
   });
 
   it("themedPreset values include all presets", () => {
     const values = [
-      "Default", "Tokyo Night", "Dracula",
-      "Gruvbox", "Nord", "Catppuccin", "Monokai",
+      "Default",
+      "Tokyo Night",
+      "Dracula",
+      "Gruvbox",
+      "Nord",
+      "Catppuccin",
+      "Monokai",
     ];
     assert.equal(values.length, 7);
   });
@@ -348,13 +444,20 @@ describe("Command registration validation", () => {
     assert.ok(typeof mod.createMockUsageData === "function");
   });
 
-  it("index.ts still parses successfully with new import", { skip: true }, async () => {
-    // index.ts imports from pi-coding-agent which requires the Pi runtime.
-    // This test is skipped for automated runs but validates the dev flow.
-    // Manual verification: the extension loads correctly inside Pi.
-    const mod = await import("../index.js");
-    assert.ok(typeof mod.default === "function", "index should export a default factory function");
-  });
+  it(
+    "index.ts still parses successfully with new import",
+    { skip: true },
+    async () => {
+      // index.ts imports from pi-coding-agent which requires the Pi runtime.
+      // This test is skipped for automated runs but validates the dev flow.
+      // Manual verification: the extension loads correctly inside Pi.
+      const mod = await import("../index.js");
+      assert.ok(
+        typeof mod.default === "function",
+        "index should export a default factory function",
+      );
+    },
+  );
 });
 
 // =============================================================================
@@ -364,8 +467,15 @@ describe("Command registration validation", () => {
 describe("Mode tab — column definitions", () => {
   it("all 9 column IDs exist in ModeColumnConfig", () => {
     const columnIds = [
-      "provider", "model", "sessions", "msgs",
-      "cost", "tokens", "tokensIn", "tokensOut", "cache",
+      "provider",
+      "model",
+      "sessions",
+      "msgs",
+      "cost",
+      "tokens",
+      "tokensIn",
+      "tokensOut",
+      "cache",
     ];
     assert.equal(columnIds.length, 9);
     const unique = new Set(columnIds);
@@ -374,9 +484,15 @@ describe("Mode tab — column definitions", () => {
 
   it("all column IDs have human-readable labels", () => {
     const labels: Record<string, string> = {
-      provider: "Provider", model: "Model", sessions: "Sessions",
-      msgs: "Msgs", cost: "Cost", tokens: "Tokens",
-      tokensIn: "Tokens In", tokensOut: "Tokens Out", cache: "Cache",
+      provider: "Provider",
+      model: "Model",
+      sessions: "Sessions",
+      msgs: "Msgs",
+      cost: "Cost",
+      tokens: "Tokens",
+      tokensIn: "Tokens In",
+      tokensOut: "Tokens Out",
+      cache: "Cache",
     };
     assert.equal(Object.keys(labels).length, 9);
     assert.equal(labels.provider, "Provider");
@@ -384,18 +500,21 @@ describe("Mode tab — column definitions", () => {
   });
 
   it("Compact/Per-Model/Expanded modes have totals toggle", () => {
-    const modesWithTotals = ["compact", "per-model", "expanded"];
+    const modesWithTotals = ["compact", "Per Model", "expanded"];
     assert.equal(modesWithTotals.length, 3);
     assert.ok(!modesWithTotals.includes("summary"));
   });
 
   it("tab indices 0-3 map to correct display modes", () => {
     const tabModes: Record<number, string> = {
-      0: "summary", 1: "compact", 2: "per-model", 3: "expanded",
+      0: "summary",
+      1: "compact",
+      2: "Per Model",
+      3: "expanded",
     };
     assert.equal(tabModes[0], "summary");
     assert.equal(tabModes[1], "compact");
-    assert.equal(tabModes[2], "per-model");
+    assert.equal(tabModes[2], "Per Model");
     assert.equal(tabModes[3], "expanded");
   });
 });
@@ -412,7 +531,9 @@ describe("Mode tab — column config persistence", () => {
     originalEnv = process.env.PI_USAGE_CONFIG_PATH;
     configPath = join(tmpdir(), `pi-usage-test-mode-${Date.now()}.json`);
     process.env.PI_USAGE_CONFIG_PATH = configPath;
-    try { await unlink(configPath); } catch {}
+    try {
+      await unlink(configPath);
+    } catch {}
     delete require.cache[require.resolve("../config-persistence.js")];
     delete require.cache[require.resolve("../settings-menu.js")];
   });
@@ -423,13 +544,15 @@ describe("Mode tab — column config persistence", () => {
     } else {
       delete process.env.PI_USAGE_CONFIG_PATH;
     }
-    try { await unlink(configPath); } catch {}
+    try {
+      await unlink(configPath);
+    } catch {}
   });
 
   it("default config has all columns shown for all modes", () => {
     const { getDefaultConfig } = require("../config-persistence.js");
     const defaults = getDefaultConfig();
-    const modes = ["summary", "compact", "per-model", "expanded"];
+    const modes = ["summary", "compact", "Per Model", "expanded"];
     for (const mode of modes) {
       const mc = defaults.modes[mode];
       assert.ok(mc, `missing mode config for ${mode}`);
@@ -450,14 +573,25 @@ describe("Mode tab — column config persistence", () => {
     const defaults = getDefaultConfig();
     assert.equal(defaults.modes.summary.showTotals, false);
     assert.equal(defaults.modes.compact.showTotals, true);
-    assert.equal(defaults.modes["per-model"].showTotals, true);
+    assert.equal(defaults.modes["Per Model"].showTotals, true);
     assert.equal(defaults.modes.expanded.showTotals, true);
   });
 
   it("hiding columns in compact mode persists", () => {
-    const { getDefaultConfig, mergeConfig, saveConfig, loadConfig } = require("../config-persistence.js");
+    const {
+      getDefaultConfig,
+      mergeConfig,
+      saveConfig,
+      loadConfig,
+    } = require("../config-persistence.js");
     const modified = mergeConfig(getDefaultConfig(), {
-      modes: { compact: { ...getDefaultConfig().modes.compact, provider: false, sessions: false } },
+      modes: {
+        compact: {
+          ...getDefaultConfig().modes.compact,
+          provider: false,
+          sessions: false,
+        },
+      },
     } as any);
     assert.equal(modified.modes.compact.provider, false);
     assert.equal(modified.modes.compact.sessions, false);
@@ -472,22 +606,41 @@ describe("Mode tab — column config persistence", () => {
   });
 
   it("toggling totals off in per-model mode persists", () => {
-    const { getDefaultConfig, mergeConfig, saveConfig, loadConfig } = require("../config-persistence.js");
+    const {
+      getDefaultConfig,
+      mergeConfig,
+      saveConfig,
+      loadConfig,
+    } = require("../config-persistence.js");
     const modified = mergeConfig(getDefaultConfig(), {
-      modes: { "per-model": { ...getDefaultConfig().modes["per-model"], showTotals: false } },
+      modes: {
+        "Per Model": {
+          ...getDefaultConfig().modes["Per Model"],
+          showTotals: false,
+        },
+      },
     } as any);
-    assert.equal(modified.modes["per-model"].showTotals, false);
+    assert.equal(modified.modes["Per Model"].showTotals, false);
     saveConfig(modified);
     delete require.cache[require.resolve("../config-persistence.js")];
     const { loadConfig: load2 } = require("../config-persistence.js");
     const loaded = load2();
-    assert.equal(loaded.modes["per-model"].showTotals, false);
+    assert.equal(loaded.modes["Per Model"].showTotals, false);
   });
 
   it("column changes in one mode do not affect other modes", () => {
-    const { getDefaultConfig, mergeConfig } = require("../config-persistence.js");
+    const {
+      getDefaultConfig,
+      mergeConfig,
+    } = require("../config-persistence.js");
     const modified = mergeConfig(getDefaultConfig(), {
-      modes: { compact: { ...getDefaultConfig().modes.compact, provider: false, msgs: false } },
+      modes: {
+        compact: {
+          ...getDefaultConfig().modes.compact,
+          provider: false,
+          msgs: false,
+        },
+      },
     } as any);
     assert.equal(modified.modes.compact.provider, false);
     assert.equal(modified.modes.expanded.provider, true);
@@ -523,12 +676,19 @@ describe("Mode tab — SettingsList structural validation", () => {
   });
 
   it("color elements are split into HEADER_ELEMENTS and VALUE_ELEMENTS", async () => {
-    const { HEADER_ELEMENTS, VALUE_ELEMENTS } = await import("../settings-menu.js");
+    const { HEADER_ELEMENTS, VALUE_ELEMENTS } =
+      await import("../settings-menu.js");
     assert.equal(HEADER_ELEMENTS.length, 13, "13 header elements");
     assert.equal(VALUE_ELEMENTS.length, 9, "9 value elements");
     // No overlap between the two lists
-    const overlap = HEADER_ELEMENTS.filter((e: string) => VALUE_ELEMENTS.includes(e));
-    assert.equal(overlap.length, 0, "HEADER_ELEMENTS and VALUE_ELEMENTS should have no overlap");
+    const overlap = HEADER_ELEMENTS.filter((e: string) =>
+      VALUE_ELEMENTS.includes(e),
+    );
+    assert.equal(
+      overlap.length,
+      0,
+      "HEADER_ELEMENTS and VALUE_ELEMENTS should have no overlap",
+    );
     // Headers should NOT include value elements
     assert.ok(!HEADER_ELEMENTS.includes("providerValue"));
     assert.ok(!VALUE_ELEMENTS.includes("providerHeader"));

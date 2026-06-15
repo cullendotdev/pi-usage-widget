@@ -93,7 +93,7 @@ export type TimeScope =
 export type DisplayMode =
   | "summary"
   | "compact"
-  | "per-model"
+  | "Per Model"
   | "expanded"
   | "hidden";
 
@@ -105,11 +105,7 @@ export type LegacyDisplayMode =
   | "detailed-expanded"
   | "hidden";
 
-export type TabName =
-  | "today"
-  | "thisWeek"
-  | "lastWeek"
-  | "allTime";
+export type TabName = "today" | "thisWeek" | "lastWeek" | "allTime";
 
 export type ViewMode = "table" | "insights";
 
@@ -135,8 +131,10 @@ export interface ModeColumnConfig {
   showTotals: boolean;
   /** Show/hide column header row for this mode */
   showHeaders: boolean;
-  /** Show/hide separator lines (header and footer) for this mode */
-  showLines: boolean;
+  /** Show/hide header separator line for this mode */
+  showHeaderLine: boolean;
+  /** Show/hide footer separator line for this mode */
+  showFooterLine: boolean;
 }
 
 /**
@@ -233,6 +231,8 @@ export interface UsageWidgetConfig {
   placement: PlacementConfig;
   /** Per-mode column configuration */
   modes: Record<DisplayMode, ModeColumnConfig>;
+  /** Per-mode enabled state — determines if the mode appears in the cycle list */
+  enabledModes: Record<DisplayMode, boolean>;
   /** Header separator line config */
   headerLine: TableLineConfig;
   /** Footer separator line config */

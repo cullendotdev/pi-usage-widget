@@ -143,7 +143,7 @@ const FULL_DATA_COLUMNS: DataColumn[] = [
   CACHE_COLUMN,
 ];
 
-/** Per-model specific columns with provider+model name columns */
+/** Per-model specific columns with Provider & Model name columns */
 const PER_MODEL_DATA_COLUMNS: DataColumn[] = [
   SESSIONS_COLUMN,
   MSGS_COLUMN,
@@ -157,50 +157,6 @@ const PER_MODEL_DATA_COLUMNS: DataColumn[] = [
 const MAX_NAME_COL_WIDTH = 24;
 
 // =============================================================================
-// Table layout candidates
-// =============================================================================
-
-const TABLE_LAYOUT_CANDIDATES: TableLayoutCandidate[] = [
-  { columns: FULL_DATA_COLUMNS, minNameWidth: MAX_NAME_COL_WIDTH },
-  {
-    columns: [SESSIONS_COLUMN, MSGS_COLUMN, WIDGET_COST_COLUMN, TOKENS_COLUMN],
-    minNameWidth: 14,
-    compact: true,
-  },
-  {
-    columns: [SESSIONS_COLUMN, WIDGET_COST_COLUMN, TOKENS_COLUMN],
-    minNameWidth: 12,
-    compact: true,
-  },
-  {
-    columns: [WIDGET_COST_COLUMN, TOKENS_COLUMN],
-    minNameWidth: 10,
-    compact: true,
-  },
-  { columns: [WIDGET_COST_COLUMN], minNameWidth: 8, compact: true },
-];
-
-// Per-model mode candidates — uses two name columns (provider + model)
-const PER_MODEL_TABLE_CANDIDATES: TableLayoutCandidate[] = [
-  { columns: PER_MODEL_DATA_COLUMNS, minNameWidth: MAX_NAME_COL_WIDTH },
-  {
-    columns: [SESSIONS_COLUMN, MSGS_COLUMN, WIDGET_COST_COLUMN, TOKENS_COLUMN],
-    minNameWidth: 10,
-    compact: true,
-  },
-  {
-    columns: [SESSIONS_COLUMN, WIDGET_COST_COLUMN, TOKENS_COLUMN],
-    minNameWidth: 8,
-    compact: true,
-  },
-  {
-    columns: [WIDGET_COST_COLUMN, TOKENS_COLUMN],
-    minNameWidth: 6,
-    compact: true,
-  },
-  { columns: [WIDGET_COST_COLUMN], minNameWidth: 4, compact: true },
-];
-
 // =============================================================================
 // Column filtering by config
 // =============================================================================
@@ -303,14 +259,16 @@ function selectTableLayout(
   candidates: TableLayoutCandidate[],
   width: number,
   hasSecondNameCol: boolean,
+  maxNameWidth: number = MAX_NAME_COL_WIDTH,
 ): TableLayout {
   const safeWidth = Math.max(width, 0);
+  const nameCap = Math.min(maxNameWidth, MAX_NAME_COL_WIDTH);
 
   for (const candidate of candidates) {
     const columnsWidth = sumColumnWidths(candidate.columns);
     // With two name columns, split name width between them
     const nameWidthBudget = Math.min(
-      MAX_NAME_COL_WIDTH,
+      nameCap,
       Math.max(safeWidth - columnsWidth, 0),
     );
 
@@ -344,7 +302,7 @@ function selectTableLayout(
   const fallback = candidates[candidates.length - 1]!;
   const fallbackColumnsWidth = sumColumnWidths(fallback.columns);
   const fallbackNameWidth = Math.min(
-    MAX_NAME_COL_WIDTH,
+    nameCap,
     Math.max(safeWidth - fallbackColumnsWidth, 0),
   );
 
@@ -538,7 +496,7 @@ function renderTotalsRow(
   const hasDualNames = layout.nameWidth2 !== undefined;
 
   if (hasDualNames) {
-    // Merge provider+model name cells into one spanned "Total" cell
+    // Merge Provider & Model name cells into one spanned "Total" cell
     const totalNameWidth = layout.nameWidth + (layout.nameWidth2 ?? 0);
     let totalRow = fitCell(
       colorFg(config, "title", theme.bold("Total")),
@@ -645,34 +603,53 @@ function renderCompact(
 
   const lines: string[] = [];
 
-  // Title
-  lines.push(colorFg(config, "title", `Usage: (${formatScopeLabel(scope)})`));
+  // Scope label for header row
+  const scopeLabel = formatScopeLabel(scope);
+  const headerLabel = `Usage (${scopeLabel})`;
 
   // Filter columns by config
   const columns = filterDataColumns(FULL_DATA_COLUMNS, columnConfig);
 
+  if (columns.length === 0 && !columnConfig.provider) {
+    // Nothing to show
+    return lines;
+  }
+
   if (columns.length === 0) {
     // No stat columns — simple provider list
-    const providers = Array.from(data.providers.entries()).sort(
-      (a, b) => b[1].cost - a[1].cost,
-    );
-    for (const [provider] of providers) {
-      lines.push(colorFg(config, "providerValue", "  " + provider));
+    if (columnConfig.provider) {
+      const providers = Array.from(data.providers.entries()).sort(
+        (a, b) => b[1].cost - a[1].cost,
+      );
+      for (const [provider] of providers) {
+        lines.push(colorFg(config, "providerValue", "  " + provider));
+      }
     }
     return lines;
   }
 
   // Build candidates from filtered columns
   const candidates: TableLayoutCandidate[] = buildLayoutCandidates(columns);
+
+  // Compute dynamic max name width from actual provider names
+  let maxNameLen = 0;
+  for (const [name] of data.providers) {
+    maxNameLen = Math.max(maxNameLen, name.length);
+  }
   const layout = selectTableLayout(candidates, width, false);
+  fitDynamicNameWidth(layout, maxNameLen + 1, width, headerLabel);
+
+  if (!columnConfig.provider) {
+    layout.nameWidth = 0;
+  }
 
   // Header
-  if (columnConfig.showHeaders) {
-    lines.push(...renderTableHeader(theme, layout, "Provider / Model", config));
+  if (columnConfig.showHeaders && columnConfig.provider) {
+    lines.push(...renderTableHeader(theme, layout, headerLabel, config));
   }
 
   // Header separator
-  if (columnConfig.showLines) {
+  if (columnConfig.showHeaderLine) {
     const headerSep = renderSeparatorLine(
       theme,
       config,
@@ -689,7 +666,7 @@ function renderCompact(
 
   if (providers.length === 0) {
     lines.push(colorFg(config, "title", "  No usage data for this period"));
-  } else {
+  } else if (columnConfig.provider) {
     for (const [providerName, providerStats] of providers) {
       const prefix = colorFg(config, "providerValue", "\u25b8 ");
       lines.push(
@@ -703,10 +680,15 @@ function renderCompact(
         ),
       );
     }
+  } else {
+    // No provider column — show just data columns
+    for (const [, providerStats] of providers) {
+      lines.push(renderDataRow(theme, "", providerStats, layout, {}, config));
+    }
   }
 
   // Footer separator
-  if (columnConfig.showLines) {
+  if (columnConfig.showFooterLine) {
     const footerSep = renderSeparatorLine(
       theme,
       config,
@@ -746,24 +728,34 @@ function renderPerModel(
 
   const lines: string[] = [];
 
-  // Title
-  lines.push(colorFg(config, "title", `Usage: (${formatScopeLabel(scope)})`));
+  // Scope label for header row
+  const scopeLabel = formatScopeLabel(scope);
+  const headerLabel = `Usage (${scopeLabel})`;
 
-  // Flatten all models from all providers, sorted by cost descending
+  // Per-Model always shows both provider and model as a combined "provider/model" column.
+  // The Provider and Model toggles only affect Per-Provider and Provider+Model modes.
+  const showProvider = true;
+  const showModel = true;
+
+  // Flatten all models from all providers, sorted by cost descending.
+  // Pre-compute the combined display name once per entry.
   interface ModelEntry {
-    provider: string;
-    model: string;
+    name: string; // "provider/model", "provider", or "model"
     stats: ModelStats;
   }
 
   const models: ModelEntry[] = [];
   for (const [providerName, providerStats] of data.providers) {
     for (const [modelName, modelStats] of providerStats.models) {
-      models.push({
-        provider: providerName,
-        model: modelName,
-        stats: modelStats,
-      });
+      const name =
+        showProvider && showModel
+          ? `${providerName}/${modelName}`
+          : showProvider
+            ? providerName
+            : showModel
+              ? modelName
+              : "";
+      models.push({ name, stats: modelStats });
     }
   }
   models.sort((a, b) => b.stats.cost - a.stats.cost);
@@ -771,41 +763,27 @@ function renderPerModel(
   // Filter columns by config
   const columns = filterDataColumns(PER_MODEL_DATA_COLUMNS, columnConfig);
 
-  if (columns.length === 0 && !columnConfig.provider && !columnConfig.model) {
+  if (columns.length === 0 && !showProvider && !showModel) {
     // Nothing to show
     return lines;
   }
 
-  // Determine if we show provider and/or model columns
-  const showProvider = columnConfig.provider;
-  const showModel = columnConfig.model;
+  // Compute dynamic max name width from the pre-computed combined names
+  let maxNameLen = 4;
+  for (const entry of models) {
+    maxNameLen = Math.max(maxNameLen, visibleWidth(entry.name));
+  }
 
   let layout: TableLayout;
 
-  if (showProvider && showModel) {
-    // Dual name columns
-    const candidates = buildLayoutCandidates(columns);
-    layout = selectTableLayout(candidates, width, true);
-    layout.nameWidth2 =
-      layout.nameWidth2 ?? Math.max(4, Math.floor(layout.nameWidth * 0.6));
-    if (columnConfig.showHeaders) {
-      lines.push(
-        ...renderTableHeader(theme, layout, "Provider", config, "Model"),
-      );
-    }
-  } else if (showProvider && !showModel) {
-    // Single provider column
+  if (showProvider || showModel) {
+    // Single name column (merged provider/model when both shown)
     const candidates = buildLayoutCandidates(columns);
     layout = selectTableLayout(candidates, width, false);
+    fitDynamicNameWidth(layout, maxNameLen + 1, width, headerLabel);
+
     if (columnConfig.showHeaders) {
-      lines.push(...renderTableHeader(theme, layout, "Provider", config));
-    }
-  } else if (!showProvider && showModel) {
-    // Single model column
-    const candidates = buildLayoutCandidates(columns);
-    layout = selectTableLayout(candidates, width, false);
-    if (columnConfig.showHeaders) {
-      lines.push(...renderTableHeader(theme, layout, "Model", config));
+      lines.push(...renderTableHeader(theme, layout, headerLabel, config));
     }
   } else {
     // No name columns — just data
@@ -815,7 +793,7 @@ function renderPerModel(
   }
 
   // Header separator
-  if (columnConfig.showLines) {
+  if (columnConfig.showHeaderLine) {
     const headerSep = renderSeparatorLine(
       theme,
       config,
@@ -829,25 +807,9 @@ function renderPerModel(
     lines.push(colorFg(config, "title", "  No usage data for this period"));
   } else {
     for (const entry of models) {
-      if (showProvider && showModel) {
+      if (showProvider || showModel) {
         lines.push(
-          renderDualNameRow(
-            theme,
-            entry.provider,
-            entry.model,
-            entry.stats,
-            layout,
-            {},
-            config,
-          ),
-        );
-      } else if (showProvider && !showModel) {
-        lines.push(
-          renderDataRow(theme, entry.provider, entry.stats, layout, {}, config),
-        );
-      } else if (!showProvider && showModel) {
-        lines.push(
-          renderDataRow(theme, entry.model, entry.stats, layout, {}, config),
+          renderDataRow(theme, entry.name, entry.stats, layout, {}, config),
         );
       } else {
         // No name columns — just data columns
@@ -863,7 +825,7 @@ function renderPerModel(
   }
 
   // Footer separator
-  if (columnConfig.showLines) {
+  if (columnConfig.showFooterLine) {
     const footerSep = renderSeparatorLine(
       theme,
       config,
@@ -875,16 +837,6 @@ function renderPerModel(
 
   // Totals
   if (columnConfig.showTotals) {
-    // Compute aggregate totals for per-model display
-    // (Re-use the existing totals from data.totals)
-    const adjLayout = { ...layout };
-    if (showProvider && showModel) {
-      // Keep dual columns
-    } else if (showProvider && !showModel) {
-      adjLayout.nameWidth2 = undefined;
-    } else if (!showProvider && showModel) {
-      adjLayout.nameWidth2 = undefined;
-    }
     lines.push(
       ...renderTotalsRow(theme, data.totals, layout, columnConfig, config),
     );
@@ -913,11 +865,20 @@ function renderExpanded(
 
   const lines: string[] = [];
 
-  // Title
-  lines.push(colorFg(config, "title", `Usage: (${formatScopeLabel(scope)})`));
+  // Scope label for header row
+  const scopeLabel = formatScopeLabel(scope);
+  const headerLabel = `Usage (${scopeLabel})`;
+
+  const showProvider = columnConfig.provider;
+  const showModel = columnConfig.model;
 
   // Filter columns by config
   const columns = filterDataColumns(FULL_DATA_COLUMNS, columnConfig);
+
+  if (columns.length === 0 && !showProvider && !showModel) {
+    // Nothing to show
+    return lines;
+  }
 
   if (columns.length === 0) {
     // No stat columns — simple provider list with models
@@ -925,28 +886,51 @@ function renderExpanded(
       (a, b) => b[1].cost - a[1].cost,
     );
     for (const [providerName, providerStats] of providers) {
-      lines.push(colorFg(config, "providerValue", "  \u25be ") + providerName);
-      const providerModels = Array.from(providerStats.models.entries()).sort(
-        (a, b) => b[1].cost - a[1].cost,
-      );
-      for (const [modelName] of providerModels) {
-        lines.push(colorFg(config, "modelValue", "      " + modelName));
+      if (showProvider) {
+        lines.push(
+          colorFg(config, "providerValue", "  \u25be ") + providerName,
+        );
+      }
+      if (showModel) {
+        const providerModels = Array.from(providerStats.models.entries()).sort(
+          (a, b) => b[1].cost - a[1].cost,
+        );
+        for (const [modelName] of providerModels) {
+          lines.push(colorFg(config, "modelValue", "      " + modelName));
+        }
       }
     }
     return lines;
   }
 
-  // Build candidates from filtered columns
+  // Compute max name width needed (provider names or indented model names)
+  let maxNameLen = 0;
+  if (showProvider || showModel) {
+    for (const [pName, pStats] of data.providers) {
+      if (showProvider) maxNameLen = Math.max(maxNameLen, pName.length);
+      if (showModel) {
+        for (const [mName] of pStats.models) {
+          maxNameLen = Math.max(maxNameLen, mName.length + 4);
+        }
+      }
+    }
+  }
+
   const candidates = buildLayoutCandidates(columns);
   const layout = selectTableLayout(candidates, width, false);
+  fitDynamicNameWidth(layout, maxNameLen + 1, width, headerLabel);
+
+  if (!showProvider && !showModel) {
+    layout.nameWidth = 0;
+  }
 
   // Header
   if (columnConfig.showHeaders) {
-    lines.push(...renderTableHeader(theme, layout, "Provider / Model", config));
+    lines.push(...renderTableHeader(theme, layout, headerLabel, config));
   }
 
   // Header separator
-  if (columnConfig.showLines) {
+  if (columnConfig.showHeaderLine) {
     const headerSep = renderSeparatorLine(
       theme,
       config,
@@ -965,38 +949,42 @@ function renderExpanded(
     lines.push(colorFg(config, "title", "  No usage data for this period"));
   } else {
     for (const [providerName, providerStats] of providers) {
-      const prefix = colorFg(config, "providerValue", "\u25be ");
-      lines.push(
-        renderDataRow(
-          theme,
-          providerName,
-          providerStats,
-          layout,
-          { prefix },
-          config,
-        ),
-      );
-
-      const providerModels = Array.from(providerStats.models.entries()).sort(
-        (a, b) => b[1].cost - a[1].cost,
-      );
-      for (const [modelName, modelStats] of providerModels) {
+      if (showProvider) {
+        const prefix = colorFg(config, "providerValue", "\u25be ");
         lines.push(
           renderDataRow(
             theme,
-            modelName,
-            modelStats,
+            providerName,
+            providerStats,
             layout,
-            { indent: 4, dimAll: true },
+            { prefix },
             config,
           ),
         );
+      }
+
+      if (showModel) {
+        const providerModels = Array.from(providerStats.models.entries()).sort(
+          (a, b) => b[1].cost - a[1].cost,
+        );
+        for (const [modelName, modelStats] of providerModels) {
+          lines.push(
+            renderDataRow(
+              theme,
+              modelName,
+              modelStats,
+              layout,
+              { indent: showProvider ? 4 : 0, dimAll: true },
+              config,
+            ),
+          );
+        }
       }
     }
   }
 
   // Footer separator
-  if (columnConfig.showLines) {
+  if (columnConfig.showFooterLine) {
     const footerSep = renderSeparatorLine(
       theme,
       config,
@@ -1019,6 +1007,59 @@ function renderExpanded(
 // =============================================================================
 // Layout candidate builder — respects column config filtering
 // =============================================================================
+
+/**
+ * After layout selection, size columns dynamically so the table fills
+ * the available width. The name column gets at least maxNameLen + 1 chars.
+ * When full-width columns fit, use them and give extra space to the name.
+ * When tight, shrink/drop data columns to make room for the name.
+ */
+function fitDynamicNameWidth(
+  layout: TableLayout,
+  maxNameLen: number,
+  availableWidth: number,
+  headerLabel?: string,
+): void {
+  if (maxNameLen <= 0 && !headerLabel) return;
+  // Consider header label width so it doesn't get truncated
+  const headerLen = headerLabel ? visibleWidth(headerLabel) : 0;
+  const minNameWidth = Math.max(maxNameLen + 1, headerLen + 1);
+  const clampedMin = Math.min(minNameWidth, availableWidth - 4);
+  const fullDataWidth = sumColumnWidths(layout.columns);
+  const fullTotal = clampedMin + fullDataWidth;
+
+  if (fullTotal <= availableWidth) {
+    // Everything fits at full width — use natural widths, extra space stays on the right
+    layout.nameWidth = minNameWidth;
+    layout.tableWidth = fullTotal;
+    return;
+  }
+
+  // Tight: keep columns at full width while budget allows,
+  // shrink the crossing column, drop the rest
+  let budget = availableWidth - clampedMin;
+  const slimmed: DataColumn[] = [];
+  for (const col of layout.columns) {
+    if (budget >= col.width) {
+      slimmed.push(col);
+      budget -= col.width;
+    } else if (budget >= 4) {
+      // Shrink this column to consume the remaining budget
+      slimmed.push({ ...col, width: budget });
+      budget = 0;
+    }
+    // else: drop this column (budget < 4)
+  }
+
+  // If no columns survived, keep at least one at 4 chars
+  if (slimmed.length === 0) {
+    slimmed.push({ ...layout.columns[0]!, width: 4 });
+  }
+
+  layout.columns = slimmed;
+  layout.nameWidth = clampedMin;
+  layout.tableWidth = layout.nameWidth + sumColumnWidths(layout.columns);
+}
 
 function buildLayoutCandidates(
   filteredColumns: DataColumn[],
@@ -1071,7 +1112,7 @@ function normalizeMode(mode: string): DisplayMode {
   const valid: DisplayMode[] = [
     "summary",
     "compact",
-    "per-model",
+    "Per Model",
     "expanded",
     "hidden",
   ];
@@ -1107,7 +1148,7 @@ export function renderWidget(
   // Handle legacy display modes (backward compat with existing widget cycle)
   const resolvedMode = normalizeMode(activeMode);
 
-  // Hidden mode
+  // Hidden mode — flash message handled by UsageWidget, render nothing here
   if (resolvedMode === "hidden") {
     return [];
   }
@@ -1150,7 +1191,7 @@ export function renderWidget(
       );
       break;
 
-    case "per-model":
+    case "Per Model":
       lines = renderPerModel(
         theme,
         columnConfig,

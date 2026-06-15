@@ -434,7 +434,7 @@ export class UsageComponent {
   private renderHeader(layout: TableLayout): string[] {
     const th = this.theme;
 
-    let headerLine = fitCell("Provider / Model", layout.nameWidth);
+    let headerLine = fitCell("Provider", layout.nameWidth);
     for (const col of layout.columns) {
       const label = fitCell(col.label, col.width, "right");
       headerLine += col.dimmed ? th.fg("dim", label) : label;

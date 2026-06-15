@@ -9,7 +9,13 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  unlinkSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -41,17 +47,24 @@ describe("Config persistence integration", () => {
   beforeEach(() => {
     process.env.PI_USAGE_CONFIG_PATH = testConfigPath;
     // Clean up any previous test config
-    try { rmSync(testConfigDir, { recursive: true }); } catch {}
+    try {
+      rmSync(testConfigDir, { recursive: true });
+    } catch {}
     mkdirSync(testConfigDir, { recursive: true });
   });
 
   afterEach(() => {
     delete process.env.PI_USAGE_CONFIG_PATH;
-    try { rmSync(testConfigDir, { recursive: true }); } catch {}
+    try {
+      rmSync(testConfigDir, { recursive: true });
+    } catch {}
   });
 
   it("loadConfig returns defaults when no config file exists", () => {
-    const { loadConfig, getDefaultConfig } = require("../config-persistence.js");
+    const {
+      loadConfig,
+      getDefaultConfig,
+    } = require("../config-persistence.js");
     const config = loadConfig();
     const defaults = getDefaultConfig();
     assert.deepStrictEqual(config, defaults);
@@ -61,8 +74,14 @@ describe("Config persistence integration", () => {
   });
 
   it("loadConfig returns merged config when partial file exists", () => {
-    const { loadConfig, getDefaultConfig } = require("../config-persistence.js");
-    writeFileSync(testConfigPath, JSON.stringify({ defaultMode: "compact", defaultScope: "allTime" }));
+    const {
+      loadConfig,
+      getDefaultConfig,
+    } = require("../config-persistence.js");
+    writeFileSync(
+      testConfigPath,
+      JSON.stringify({ defaultMode: "compact", defaultScope: "allTime" }),
+    );
     const config = loadConfig();
     assert.strictEqual(config.defaultMode, "compact");
     assert.strictEqual(config.defaultScope, "allTime");
@@ -85,7 +104,10 @@ describe("Config persistence integration", () => {
   });
 
   it("loadConfig handles invalid JSON gracefully", () => {
-    const { loadConfig, getDefaultConfig } = require("../config-persistence.js");
+    const {
+      loadConfig,
+      getDefaultConfig,
+    } = require("../config-persistence.js");
     writeFileSync(testConfigPath, "this is not json {{");
     const config = loadConfig();
     assert.deepStrictEqual(config, getDefaultConfig());
@@ -115,19 +137,41 @@ describe("UsageWidget — cycle commands persist config", () => {
   beforeEach(() => {
     saveCalls = [];
     process.env.PI_USAGE_CONFIG_PATH = testConfigPath;
-    try { rmSync(testConfigDir, { recursive: true }); } catch {}
+    try {
+      rmSync(testConfigDir, { recursive: true });
+    } catch {}
     mkdirSync(testConfigDir, { recursive: true });
   });
 
   afterEach(() => {
     delete process.env.PI_USAGE_CONFIG_PATH;
-    try { rmSync(testConfigDir, { recursive: true }); } catch {}
+    try {
+      rmSync(testConfigDir, { recursive: true });
+    } catch {}
   });
 
   it("cycleMode advances through all display modes and persists each", () => {
-    const { loadConfig, saveConfig, getDefaultConfig } = require("../config-persistence.js");
-    const DISPLAY_MODES = ["summary", "compact", "per-model", "expanded", "hidden"];
-    const SCOPE_ORDER = ["lastHour", "today", "yesterday", "thisWeek", "lastWeek", "thisMonth", "allTime"];
+    const {
+      loadConfig,
+      saveConfig,
+      getDefaultConfig,
+    } = require("../config-persistence.js");
+    const DISPLAY_MODES = [
+      "summary",
+      "compact",
+      "Per Model",
+      "expanded",
+      "hidden",
+    ];
+    const SCOPE_ORDER = [
+      "lastHour",
+      "today",
+      "yesterday",
+      "thisWeek",
+      "lastWeek",
+      "thisMonth",
+      "allTime",
+    ];
 
     // Simulate: on session_start, load config
     const config = loadConfig();
@@ -140,8 +184,11 @@ describe("UsageWidget — cycle commands persist config", () => {
       config.defaultMode = next;
       saveConfig(config);
       const reloaded = loadConfig();
-      assert.strictEqual(reloaded.defaultMode, next,
-        `After cycle ${i + 1}, expected mode=${next}, got ${reloaded.defaultMode}`);
+      assert.strictEqual(
+        reloaded.defaultMode,
+        next,
+        `After cycle ${i + 1}, expected mode=${next}, got ${reloaded.defaultMode}`,
+      );
     }
 
     // After 5 cycles, should wrap back to summary
@@ -151,7 +198,15 @@ describe("UsageWidget — cycle commands persist config", () => {
 
   it("cycleScope advances through all scopes and persists each", () => {
     const { loadConfig, saveConfig } = require("../config-persistence.js");
-    const SCOPE_ORDER = ["lastHour", "today", "yesterday", "thisWeek", "lastWeek", "thisMonth", "allTime"];
+    const SCOPE_ORDER = [
+      "lastHour",
+      "today",
+      "yesterday",
+      "thisWeek",
+      "lastWeek",
+      "thisMonth",
+      "allTime",
+    ];
 
     const config = loadConfig();
     assert.strictEqual(config.defaultScope, "today");
@@ -203,13 +258,20 @@ describe("getUsageData — data-collection module integration", () => {
   it("getUsageData resolves with empty data when no sessions exist", async () => {
     // Temporarily point sessions dir to a non-existent path
     const original = process.env.PI_CODING_AGENT_DIR;
-    process.env.PI_CODING_AGENT_DIR = join(tmpdir(), "pi-usage-nonexistent-sessions");
+    process.env.PI_CODING_AGENT_DIR = join(
+      tmpdir(),
+      "pi-usage-nonexistent-sessions",
+    );
     try {
       const { getUsageData } = require("../data-collection.js");
       const result = await getUsageData();
       assert.ok(result, "getUsageData should return a result");
       assert.ok(result.allTime, "should have allTime data");
-      assert.strictEqual(result.allTime.totals.messages, 0, "should have 0 messages for no sessions");
+      assert.strictEqual(
+        result.allTime.totals.messages,
+        0,
+        "should have 0 messages for no sessions",
+      );
     } finally {
       if (original) {
         process.env.PI_CODING_AGENT_DIR = original;
@@ -245,7 +307,11 @@ describe("Render engine — config-driven display modes", () => {
     const data = createMockUsageData();
 
     const result = renderWidget(config, theme, data, 80, "hidden", "today");
-    assert.deepStrictEqual(result, [], "hidden mode should return empty array");
+    assert.deepStrictEqual(
+      result,
+      [],
+      "hidden mode should return empty (flash handled by UsageWidget)",
+    );
   });
 
   it("renderWidget renders summary mode with properties", () => {
@@ -262,7 +328,10 @@ describe("Render engine — config-driven display modes", () => {
     assert.ok(result.length > 0, "summary should produce output");
     const combined = result.join("");
     // With mock theme, text passes through — check for expected content
-    assert.ok(combined.includes("OpenAI") || combined.includes("Usage"), "should include provider or usage text");
+    assert.ok(
+      combined.includes("OpenAI") || combined.includes("Usage"),
+      "should include provider or usage text",
+    );
   });
 
   it("renderWidget renders compact mode with column config", () => {
@@ -283,8 +352,10 @@ describe("Render engine — config-driven display modes", () => {
     const result = renderWidget(config, theme, data, 120, "compact", "today");
     const combined = result.join("");
     // Cache column should be absent, Cost column should be present
-    assert.ok(!combined.includes("Cache") || combined.includes("Cost"),
-      "should reflect column config");
+    assert.ok(
+      !combined.includes("Cache") || combined.includes("Cost"),
+      "should reflect column config",
+    );
   });
 
   it("renderWidget with different scope uses correct data", () => {
@@ -296,8 +367,22 @@ describe("Render engine — config-driven display modes", () => {
     const theme = mockTheme();
     const data = createMockUsageData();
 
-    const todayResult = renderWidget(config, theme, data, 80, "summary", "today");
-    const allTimeResult = renderWidget(config, theme, data, 80, "summary", "allTime");
+    const todayResult = renderWidget(
+      config,
+      theme,
+      data,
+      80,
+      "summary",
+      "today",
+    );
+    const allTimeResult = renderWidget(
+      config,
+      theme,
+      data,
+      80,
+      "summary",
+      "allTime",
+    );
 
     // Both should produce output
     assert.ok(todayResult.length > 0);
@@ -315,17 +400,25 @@ describe("Settings menu integration — config reload after close", () => {
 
   beforeEach(() => {
     process.env.PI_USAGE_CONFIG_PATH = testConfigPath;
-    try { rmSync(testConfigDir, { recursive: true }); } catch {}
+    try {
+      rmSync(testConfigDir, { recursive: true });
+    } catch {}
     mkdirSync(testConfigDir, { recursive: true });
   });
 
   afterEach(() => {
     delete process.env.PI_USAGE_CONFIG_PATH;
-    try { rmSync(testConfigDir, { recursive: true }); } catch {}
+    try {
+      rmSync(testConfigDir, { recursive: true });
+    } catch {}
   });
 
   it("after settings change, reloading config reflects new values", () => {
-    const { loadConfig, saveConfig, getDefaultConfig } = require("../config-persistence.js");
+    const {
+      loadConfig,
+      saveConfig,
+      getDefaultConfig,
+    } = require("../config-persistence.js");
 
     // Initial state
     const initial = loadConfig();
@@ -344,11 +437,11 @@ describe("Settings menu integration — config reload after close", () => {
     const { loadConfig, saveConfig } = require("../config-persistence.js");
 
     const config = loadConfig();
-    config.defaultMode = "per-model";
+    config.defaultMode = "Per Model";
     saveConfig(config);
 
     const reloaded = loadConfig();
-    assert.strictEqual(reloaded.defaultMode, "per-model");
+    assert.strictEqual(reloaded.defaultMode, "Per Model");
   });
 
   it("settings changes to defaultScope are reflected after reload", () => {
@@ -419,10 +512,16 @@ describe("Resource cleanup — session lifecycle simulation", () => {
     controller.abort();
 
     // Verify signal is aborted
-    assert.ok(controller.signal.aborted, "signal should be aborted after abort() call");
+    assert.ok(
+      controller.signal.aborted,
+      "signal should be aborted after abort() call",
+    );
 
     // A new controller should not be aborted
     const newController = new AbortController();
-    assert.ok(!newController.signal.aborted, "new controller should not be aborted");
+    assert.ok(
+      !newController.signal.aborted,
+      "new controller should not be aborted",
+    );
   });
 });
