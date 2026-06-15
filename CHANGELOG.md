@@ -3,7 +3,14 @@
 ## [Unreleased]
 
 ### Added
+- **Customize Layout refactored with grouped sections.** The Customize Layout submenu now splits into a "Settings" section (Totals Row, Headers, Header Line, Footer Line) and a "Columns" section (all stat columns), with clear visual headers.
+- **Column reorder with live preview.** Press `r` on any data column in the Customize Layout menu to enter reorder mode. Use ↑↓ to move columns, Enter to confirm, Esc to cancel — the live preview updates instantly as you move columns.
+- **Column spacing in widget output.** A space is now guaranteed between every pair of adjacent column headers and values, preventing visual collisions when a value fills its full column width.
 - **Headers & Lines toggles in Visible Columns settings.** The per-mode Visible Columns menu now includes "Headers" and "Lines" toggles, letting you hide the column header row or separator lines independently in Compact, Per-Model, and Expanded display modes.
+
+### Fixed
+- **Esc in reorder mode.** Pressing Escape while reordering columns now correctly cancels reorder and stays in the Customize Layout submenu, instead of navigating back to the previous menu.
+- **Blank Settings section in summary mode.** Summary mode no longer renders an empty "Settings" header in Customize Layout — summary has no applicable meta toggles.
 
 ## [0.3.2] - 2026-05-07
 

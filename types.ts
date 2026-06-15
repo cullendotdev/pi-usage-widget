@@ -135,6 +135,12 @@ export interface ModeColumnConfig {
   showHeaderLine: boolean;
   /** Show/hide footer separator line for this mode */
   showFooterLine: boolean;
+  /**
+   * Column display order for data columns (sessions, msgs, cost, tokens,
+   * tokensIn, tokensOut, cache). Name columns (provider, model) are not
+   * included — they are always rendered first when applicable.
+   */
+  columnOrder: string[];
 }
 
 /**

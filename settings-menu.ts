@@ -13,19 +13,13 @@
  *   - HEADER_ELEMENTS, VALUE_ELEMENTS — color element groupings
  */
 
-import {
-  Container,
-  Spacer,
-  SettingsList,
-  Text,
-  visibleWidth,
-  type Component,
-  type SettingItem,
-  type SettingsListTheme,
-} from "@earendil-works/pi-tui";
-import { DynamicBorder } from "@earendil-works/pi-coding-agent";
+import { Text, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { loadConfig, saveConfig } from "./config-persistence.js";
+import {
+  loadConfig,
+  saveConfig,
+  DEFAULT_COLUMN_ORDER,
+} from "./config-persistence.js";
 import { renderWidget } from "./widget-render.js";
 import type {
   UsageWidgetConfig,
@@ -201,7 +195,16 @@ const TAB_MODE: Record<number, DisplayMode> = {
   4: "expanded",
 };
 
-const TOGGLE_VALUES = ["Show", "Hide"];
+// =============================================================================
+// Customize Layout submenu types
+// =============================================================================
+
+interface LayoutItem {
+  type: "section" | "setting" | "column";
+  id: string;
+  label: string;
+  value: string; // "Show" | "Hide" | "" (empty for section headers)
+}
 
 // =============================================================================
 // Navigator depth tracking
@@ -477,29 +480,6 @@ function buildScopeStats(scale: number): TimeFilteredStats {
 }
 
 // =============================================================================
-// SettingsList theme
-// =============================================================================
-
-function createSettingsListTheme(
-  theme: Theme,
-  isGlobal: boolean = true,
-): SettingsListTheme {
-  return {
-    label: (text: string, _selected: boolean) => {
-      return theme.fg(isGlobal ? "text" : "dim", text);
-    },
-    value: (text: string, selected: boolean) => {
-      return theme.fg(selected ? "accent" : "text", text);
-    },
-    description: (text: string) => {
-      return theme.fg("dim", text);
-    },
-    cursor: theme.fg("accent", "▸ "),
-    hint: (text: string) => theme.fg("muted", text),
-  };
-}
-
-// =============================================================================
 // SettingsMenu Component
 // =============================================================================
 
@@ -514,8 +494,13 @@ export class SettingsMenu implements Component {
   /** Flash warning message shown briefly in the mode navigator (cleared on next input). */
   private flashWarning: string | null = null;
 
-  // Submenu SettingsLists (created on demand)
-  private activeSettingsList: SettingsList | null = null;
+  // Customize Layout submenu state (replaces SettingsList)
+  private layoutItems: LayoutItem[] = [];
+  private layoutCursor: number = 0;
+  private reorderMode: boolean = false;
+  private reorderDragIndex: number = 0;
+  /** Saved column order before entering reorder mode (restored on Esc cancel). */
+  private originalColumnOrder: string[] = [];
 
   // Cached values for the preview
   private previewCache: string[] = [];
@@ -574,100 +559,260 @@ export class SettingsMenu implements Component {
     return TAB_MODE[this.activeTab] ?? "compact";
   }
 
-  /** Build a SettingsList for column toggles in a mode. */
-  private buildColumnsSettingsList(mode: DisplayMode): SettingsList {
-    const stheme = createSettingsListTheme(this.theme, false);
+  /** Build the items array for the Customize Layout submenu. */
+  private buildCustomizeLayoutItems(mode: DisplayMode): LayoutItem[] {
     const columnConfig = this.config.modes[mode];
-    const items: SettingItem[] = [];
+    const items: LayoutItem[] = [];
     const isSummary = mode === "summary";
-    const isCompact = mode === "compact";
 
-    // Determine which columns are applicable for this mode:
-    // - Summary: single-line pipe, no name columns, no meta toggles
-    // - Per-Provider (Compact): provider column only, no model
-    // - Per-Model: always shows combined provider/model — no toggles for either
-    // - Provider+Model (Expanded): both provider and model toggles
-    const isPerModel = mode === "Per Model";
-    const showProvider = (isCompact || mode === "expanded") && !isPerModel;
-    const showModel = mode === "expanded" && !isPerModel;
-    const showMeta = !isSummary; // showTotals, showHeaders, showHeaderLine, showFooterLine
-
-    for (const col of ALL_COLUMNS) {
-      // Skip provider if not applicable to this mode
-      if (col.id === "provider" && !showProvider) continue;
-      // Skip model if not applicable to this mode
-      if (col.id === "model" && !showModel) continue;
-
-      const visible = columnConfig[col.id] as boolean;
-
+    // ---- Section: Settings (only if there are settings to show) ----
+    if (!isSummary) {
       items.push({
-        id: col.id,
-        label: col.label,
-        description: col.description,
-        currentValue: visible ? "Show" : "Hide",
-        values: TOGGLE_VALUES,
+        type: "section",
+        id: "__settings__",
+        label: "Settings:",
+        value: "",
       });
-    }
-
-    if (showMeta) {
       items.push({
+        type: "setting",
         id: "showTotals",
         label: "Totals Row",
-        description: "Show/hide the totals summary row",
-        currentValue: columnConfig.showTotals ? "Show" : "Hide",
-        values: TOGGLE_VALUES,
+        value: columnConfig.showTotals ? "Show" : "Hide",
       });
       items.push({
+        type: "setting",
         id: "showHeaders",
         label: "Headers",
-        description: "Show/hide the column header row",
-        currentValue: columnConfig.showHeaders ? "Show" : "Hide",
-        values: TOGGLE_VALUES,
+        value: columnConfig.showHeaders ? "Show" : "Hide",
       });
       items.push({
+        type: "setting",
         id: "showHeaderLine",
         label: "Header Line",
-        description:
-          "Show/hide the header separator line below the column headers",
-        currentValue: columnConfig.showHeaderLine ? "Show" : "Hide",
-        values: TOGGLE_VALUES,
+        value: columnConfig.showHeaderLine ? "Show" : "Hide",
       });
       items.push({
+        type: "setting",
         id: "showFooterLine",
         label: "Footer Line",
-        description: "Show/hide the footer separator line above the totals row",
-        currentValue: columnConfig.showFooterLine ? "Show" : "Hide",
-        values: TOGGLE_VALUES,
+        value: columnConfig.showFooterLine ? "Show" : "Hide",
       });
     }
 
-    return new SettingsList(
-      items,
-      14,
-      stheme,
-      (id: string, newValue: string) => {
-        const boolValue = newValue === "Show";
-        if (id === "showTotals") {
-          if (columnConfig.showTotals !== boolValue) {
-            columnConfig.showTotals = boolValue;
-            saveConfig(this.config);
-            this.invalidatePreview();
-            this.tui.requestRender();
-          }
-        } else if (id in columnConfig) {
-          const key = id as keyof ModeColumnConfig;
-          const current = columnConfig[key];
-          if (typeof current === "boolean" && current !== boolValue) {
-            (columnConfig as Record<string, boolean>)[id] = boolValue;
-            saveConfig(this.config);
-            this.invalidatePreview();
-            this.tui.requestRender();
-          }
+    // ---- Section: Columns ----
+    items.push({
+      type: "section",
+      id: "__columns__",
+      label: "Columns:",
+      value: "",
+    });
+
+    // Name columns (provider / model) — conditional on mode
+    const isPerModel = mode === "Per Model";
+    const showProvider = mode === "expanded" || isPerModel;
+    const showModel = mode === "expanded";
+
+    if (showProvider) {
+      items.push({
+        type: "column",
+        id: "provider",
+        label: "Provider",
+        value: columnConfig.provider ? "Show" : "Hide",
+      });
+    }
+    if (showModel) {
+      items.push({
+        type: "column",
+        id: "model",
+        label: "Model",
+        value: columnConfig.model ? "Show" : "Hide",
+      });
+    }
+
+    // Data columns — in configured order
+    const order =
+      columnConfig.columnOrder && columnConfig.columnOrder.length > 0
+        ? columnConfig.columnOrder
+        : DEFAULT_COLUMN_ORDER;
+
+    for (const colId of order) {
+      const col = ALL_COLUMNS.find((c) => c.id === colId);
+      if (col) {
+        const visible =
+          (columnConfig as Record<string, boolean>)[colId] ?? true;
+        items.push({
+          type: "column",
+          id: colId,
+          label: col.label,
+          value: visible ? "Show" : "Hide",
+        });
+      }
+    }
+
+    return items;
+  }
+
+  /** Toggle a layout item's Show/Hide value and persist. */
+  private toggleLayoutItem(mode: DisplayMode, id: string): void {
+    const columnConfig = this.config.modes[mode];
+    if (id === "showTotals") {
+      columnConfig.showTotals = !columnConfig.showTotals;
+    } else if (id in columnConfig) {
+      const key = id as keyof ModeColumnConfig;
+      const current = columnConfig[key];
+      if (typeof current === "boolean") {
+        (columnConfig as Record<string, boolean>)[id] = !current;
+      }
+    }
+    saveConfig(this.config);
+    this.invalidatePreview();
+    // Caller is responsible for rebuilding items and requesting render
+  }
+
+  /** Get the indices (in layoutItems) of data columns (not name columns). */
+  private getDataColumnIndices(): number[] {
+    const indices: number[] = [];
+    for (let i = 0; i < this.layoutItems.length; i++) {
+      const item = this.layoutItems[i]!;
+      if (
+        item.type === "column" &&
+        item.id !== "provider" &&
+        item.id !== "model"
+      ) {
+        indices.push(i);
+      }
+    }
+    return indices;
+  }
+
+  /** Swap the selected data column up or down in reorder mode. */
+  private moveReorderColumn(dir: -1 | 1, mode: DisplayMode): void {
+    const dataIndices = this.getDataColumnIndices();
+    const pos = dataIndices.indexOf(this.reorderDragIndex);
+    if (pos === -1) return;
+    const newPos = pos + dir;
+    if (newPos < 0 || newPos >= dataIndices.length) return;
+
+    // Swap the two items in layoutItems
+    const a = dataIndices[pos]!;
+    const b = dataIndices[newPos]!;
+    const temp = this.layoutItems[a]!;
+    this.layoutItems[a] = this.layoutItems[b]!;
+    this.layoutItems[b] = temp;
+    this.reorderDragIndex = b;
+
+    // Update config's columnOrder so the live preview reflects the swap
+    this.config.modes[mode].columnOrder = this.layoutItems
+      .filter(
+        (item) =>
+          item.type === "column" &&
+          item.id !== "provider" &&
+          item.id !== "model",
+      )
+      .map((item) => item.id);
+
+    // Update preview immediately so user sees column order change in live preview
+    this.invalidatePreview();
+
+    this.tui.requestRender();
+  }
+
+  /** Persist the current column order from layoutItems to config. */
+  private persistColumnOrder(mode: DisplayMode): void {
+    const columnConfig = this.config.modes[mode];
+    columnConfig.columnOrder = this.layoutItems
+      .filter(
+        (item) =>
+          item.type === "column" &&
+          item.id !== "provider" &&
+          item.id !== "model",
+      )
+      .map((item) => item.id);
+    saveConfig(this.config);
+  }
+
+  // ===========================================================================
+  // Customize Layout submenu rendering
+  // ===========================================================================
+
+  /** Render the custom layout submenu (Settings section + Columns section). */
+  private renderCustomizeLayout(width: number): string[] {
+    const lines: string[] = [];
+    const innerWidth = width - 4;
+    const ac = this.theme.fg.bind(this.theme);
+
+    // Determine if Settings section exists
+    const hasSettings =
+      this.layoutItems.length > 0 &&
+      this.layoutItems[0]!.type === "section" &&
+      this.layoutItems[0]!.id === "__settings__";
+
+    // Section: Settings (only if there are setting items)
+    if (hasSettings) {
+      lines.push(
+        "  " +
+          ac("dim", "── Settings " + "─".repeat(Math.max(0, innerWidth - 12))),
+      );
+    }
+
+    for (let i = 0; i < this.layoutItems.length; i++) {
+      const item = this.layoutItems[i]!;
+
+      // Section header: switch to Columns section
+      if (item.type === "section") {
+        if (item.id === "__columns__") {
+          lines.push(
+            "  " +
+              ac(
+                "dim",
+                "── Columns " + "─".repeat(Math.max(0, innerWidth - 11)),
+              ),
+          );
         }
-      },
-      () => this.navigateBack(),
-      { enableSearch: false },
-    );
+        continue;
+      }
+
+      const isSelected = i === this.layoutCursor;
+      const isReorderDrag = this.reorderMode && i === this.reorderDragIndex;
+      const canReorder =
+        item.type === "column" && item.id !== "provider" && item.id !== "model";
+
+      // Cursor / reorder indicators
+      let cursor: string;
+      if (isReorderDrag) {
+        cursor = ac("accent", "⇔ ");
+      } else if (isSelected && this.reorderMode) {
+        cursor = ac("warning", "> ");
+      } else if (isSelected) {
+        cursor = ac("accent", "▸ ");
+      } else {
+        cursor = "  ";
+      }
+
+      // Label
+      const labelText = isSelected
+        ? ac("accent", item.label.padEnd(16))
+        : ac("text", item.label.padEnd(16));
+
+      // Value
+      let valueText: string;
+      if (isReorderDrag) {
+        valueText = ac("accent", item.value + " ◄►");
+      } else if (isSelected && canReorder && !this.reorderMode) {
+        valueText = ac("accent", item.value) + ac("dim", "  (r=reorder)");
+      } else if (isSelected) {
+        valueText = ac("accent", item.value);
+      } else {
+        valueText = ac("text", item.value);
+      }
+
+      lines.push(`  ${cursor} ${labelText} ${valueText}`);
+    }
+
+    lines.push("  " + ac("dim", "─".repeat(Math.max(0, innerWidth))));
+    lines.push("");
+
+    return lines;
   }
 
   // ===========================================================================
@@ -679,7 +824,9 @@ export class SettingsMenu implements Component {
       const wasDepth = this.depth;
       this.depth = (this.depth - 1) as NavDepth;
       this.selectedIndex = 0;
-      this.activeSettingsList = null;
+      this.reorderMode = false;
+      this.layoutItems = [];
+      this.layoutCursor = 0;
       this.previewPreset = null;
       this.invalidatePreview();
       // Restore parent submenu when returning from depth 2 → 1
@@ -1617,12 +1764,8 @@ export class SettingsMenu implements Component {
       ];
     }
 
-    // If activeSettingsList is set (depth 1 Columns submenu), render it
-    if (
-      this.activeSettingsList &&
-      this.depth === 1 &&
-      this.activeSubMenu === "columns"
-    ) {
+    // Customize Layout submenu — custom rendering
+    if (this.depth === 1 && this.activeSubMenu === "columns") {
       const lines: string[] = [];
 
       // Top border
@@ -1644,15 +1787,16 @@ export class SettingsMenu implements Component {
       // Live preview
       lines.push(...this.renderPreviewSection(safeWidth));
 
-      // SettingsList content
-      const settingsLines = this.activeSettingsList.render(safeWidth);
-      for (const line of settingsLines) {
-        lines.push("  " + line);
+      // Custom layout content
+      const layoutLines = this.renderCustomizeLayout(safeWidth);
+      for (const line of layoutLines) {
+        lines.push(line);
       }
 
-      lines.push("");
       lines.push(this.theme.fg("dim", "─".repeat(safeWidth)));
-      const hint = "↑↓ select  ← → cycle  Esc back";
+      const hint = this.reorderMode
+        ? "↑↓ move column • Enter done • Esc cancel reorder"
+        : "↑↓ select • Enter toggle • r reorder • Esc back";
       const leftPad = Math.floor((safeWidth - hint.length) / 2);
       lines.push(this.theme.fg("dim", " ".repeat(leftPad) + hint));
       lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
@@ -1822,6 +1966,12 @@ export class SettingsMenu implements Component {
       this.tui.requestRender();
     }
 
+    // ── Reorder mode: Esc / q always cancels reorder, never navigates back ──
+    if (this.reorderMode && (input === "\x1b" || input === "q")) {
+      this.handleLayoutInput(input);
+      return;
+    }
+
     // If color picker is active, delegate to it
     if (this.colorPicker) {
       this.colorPicker.handleInput(input);
@@ -1847,7 +1997,12 @@ export class SettingsMenu implements Component {
 
     // Escape / q — close menu or navigate back
     if (input === "\x1b" || input === "q") {
-      if (this.depth > 0 || this.activeSettingsList) {
+      if (this.depth > 0) {
+        // If in reorder mode inside columns submenu, let handleLayoutInput cancel it
+        if (this.reorderMode && this.activeSubMenu === "columns") {
+          this.handleLayoutInput(input);
+          return;
+        }
         this.navigateBack();
         return;
       }
@@ -1871,7 +2026,9 @@ export class SettingsMenu implements Component {
       this.globalNavIndex = 0;
       this.selectedIndex = 0;
       this.depth = 0;
-      this.activeSettingsList = null;
+      this.reorderMode = false;
+      this.layoutItems = [];
+      this.layoutCursor = 0;
       this.activeSubMenu = null;
       this.invalidatePreview();
       this.tui.requestRender();
@@ -1884,16 +2041,18 @@ export class SettingsMenu implements Component {
       this.globalNavIndex = 0;
       this.selectedIndex = 0;
       this.depth = 0;
-      this.activeSettingsList = null;
+      this.reorderMode = false;
+      this.layoutItems = [];
+      this.layoutCursor = 0;
       this.activeSubMenu = null;
       this.invalidatePreview();
       this.tui.requestRender();
       return;
     }
 
-    // Delegate to SettingsList if one is active (depth 1 submenu)
-    if (this.activeSettingsList && this.depth === 1) {
-      this.activeSettingsList.handleInput(input);
+    // Handle Customize Layout submenu input
+    if (this.depth === 1 && this.activeSubMenu === "columns") {
+      this.handleLayoutInput(input);
       return;
     }
 
@@ -1907,6 +2066,124 @@ export class SettingsMenu implements Component {
 
   // ===========================================================================
   // Global tab input
+  // ===========================================================================
+  // Customize Layout submenu input
+  // ===========================================================================
+
+  private handleLayoutInput(input: string): void {
+    const mode = this.getCurrentModeTab();
+    if (!mode) return;
+
+    // Reorder mode: handle arrow keys and confirm/cancel
+    if (this.reorderMode) {
+      if (input === "\x1b[A" || input === "\x1bOA") {
+        this.moveReorderColumn(-1, mode);
+        return;
+      }
+      if (input === "\x1b[B" || input === "\x1bOB") {
+        this.moveReorderColumn(1, mode);
+        return;
+      }
+      if (input === "\r" || input === "\n") {
+        // Confirm reorder — persist to disk and exit reorder mode
+        this.persistColumnOrder(mode);
+        this.originalColumnOrder = [];
+        this.reorderMode = false;
+        this.tui.requestRender();
+        return;
+      }
+      if (input === "\x1b") {
+        // Cancel reorder — restore original column order and reload
+        this.config.modes[mode].columnOrder = [...this.originalColumnOrder];
+        this.originalColumnOrder = [];
+        this.reorderMode = false;
+        this.layoutItems = this.buildCustomizeLayoutItems(mode);
+        this.invalidatePreview();
+        this.tui.requestRender();
+        return;
+      }
+      return;
+    }
+
+    // Normal mode input
+    if (input === "\x1b[A" || input === "\x1bOA") {
+      // Move cursor up, skipping section headers
+      let newCursor = this.layoutCursor - 1;
+      while (
+        newCursor >= 0 &&
+        this.layoutItems[newCursor]!.type === "section"
+      ) {
+        newCursor--;
+      }
+      if (newCursor >= 0) {
+        this.layoutCursor = newCursor;
+        this.tui.requestRender();
+      }
+      return;
+    }
+
+    if (input === "\x1b[B" || input === "\x1bOB") {
+      // Move cursor down, skipping section headers
+      let newCursor = this.layoutCursor + 1;
+      while (
+        newCursor < this.layoutItems.length &&
+        this.layoutItems[newCursor]!.type === "section"
+      ) {
+        newCursor++;
+      }
+      if (newCursor < this.layoutItems.length) {
+        this.layoutCursor = newCursor;
+        this.tui.requestRender();
+      }
+      return;
+    }
+
+    // Left/Right or Enter to toggle
+    if (
+      input === "\x1b[C" ||
+      input === "\x1bOC" ||
+      input === "\x1b[D" ||
+      input === "\x1bOD" ||
+      input === "\r" ||
+      input === "\n"
+    ) {
+      const item = this.layoutItems[this.layoutCursor];
+      if (item && item.type !== "section") {
+        this.toggleLayoutItem(mode, item.id);
+        // Refresh items to reflect new values
+        this.layoutItems = this.buildCustomizeLayoutItems(mode);
+        this.tui.requestRender();
+      }
+      return;
+    }
+
+    // "r" hotkey — enter reorder mode on a data column
+    if (input === "r" || input === "R") {
+      const item = this.layoutItems[this.layoutCursor];
+      if (
+        item &&
+        item.type === "column" &&
+        item.id !== "provider" &&
+        item.id !== "model"
+      ) {
+        // Save original order before entering reorder (for Esc cancel)
+        this.originalColumnOrder = [
+          ...(this.config.modes[mode].columnOrder ?? DEFAULT_COLUMN_ORDER),
+        ];
+        this.reorderMode = true;
+        this.reorderDragIndex = this.layoutCursor;
+        this.tui.requestRender();
+      }
+      return;
+    }
+
+    // Escape to go back
+    if (input === "\x1b") {
+      this.navigateBack();
+      return;
+    }
+  }
+
   // ===========================================================================
 
   private handleGlobalTabInput(input: string): void {
@@ -2240,7 +2517,16 @@ export class SettingsMenu implements Component {
         // Customize Layout
         this.depth = 1;
         this.activeSubMenu = "columns";
-        this.activeSettingsList = this.buildColumnsSettingsList(mode);
+        this.reorderMode = false;
+        this.layoutItems = this.buildCustomizeLayoutItems(mode);
+        this.layoutCursor = 0;
+        // Start cursor on first non-section item
+        for (let i = 0; i < this.layoutItems.length; i++) {
+          if (this.layoutItems[i]!.type !== "section") {
+            this.layoutCursor = i;
+            break;
+          }
+        }
         this.tui.requestRender();
         break;
       }

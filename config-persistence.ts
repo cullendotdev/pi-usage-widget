@@ -38,6 +38,17 @@ function getConfigPath(): string {
 // Default configuration
 // =============================================================================
 
+/** Default data column order (matches historical widget output). */
+export const DEFAULT_COLUMN_ORDER = [
+  "sessions",
+  "msgs",
+  "cost",
+  "tokens",
+  "tokensIn",
+  "tokensOut",
+  "cache",
+];
+
 function defaultModeColumnConfig(): ModeColumnConfig {
   return {
     provider: true,
@@ -53,6 +64,7 @@ function defaultModeColumnConfig(): ModeColumnConfig {
     showHeaders: true,
     showHeaderLine: true,
     showFooterLine: true,
+    columnOrder: [...DEFAULT_COLUMN_ORDER],
   };
 }
 

@@ -171,7 +171,7 @@ Run `/usage-settings` to open the interactive settings menu. It lets you customi
 
 - **Display Mode** and **Time Scope** defaults
 - **Theme Preset** with live preview (7 themes: Default, Tokyo Night, Dracula, Gruvbox, Nord, Catppuccin, Monokai)
-- **Visible Columns** — toggle individual stat columns per mode, plus the totals row, column headers, and separator lines
+- **Customize Layout** — per-mode column visibility and ordering, grouped into Settings (Totals Row, Headers, Header/Footer Lines) and Columns sections. Press `r` on a column to reorder with live preview.
 - **Custom Theme Colors** — override colors per visual element (headers, values, separators)
 
 Settings persist across sessions in `~/.pi/agent/pi-usage-widget-settings.json`.

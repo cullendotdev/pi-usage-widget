@@ -162,25 +162,45 @@ const MAX_NAME_COL_WIDTH = 24;
 // =============================================================================
 
 /**
- * Filter data columns based on the mode's column visibility config.
+ * Filter data columns based on the mode's column visibility config
+ * and sort them according to the configured columnOrder.
  * The name column (provider/model) is handled separately.
  */
 function filterDataColumns(
-  allColumns: DataColumn[],
+  _allColumns: DataColumn[],
   columnConfig: ModeColumnConfig,
 ): DataColumn[] {
-  const result: DataColumn[] = [];
+  // Map column IDs to their DataColumn objects
+  const columnMap: Record<string, DataColumn> = {
+    sessions: SESSIONS_COLUMN,
+    msgs: MSGS_COLUMN,
+    cost: WIDGET_COST_COLUMN,
+    tokens: TOKENS_COLUMN,
+    tokensIn: INPUT_COLUMN,
+    tokensOut: OUTPUT_COLUMN,
+    cache: CACHE_COLUMN,
+  };
 
-  if (columnConfig.sessions) result.push(SESSIONS_COLUMN);
-  if (columnConfig.msgs) result.push(MSGS_COLUMN);
-  if (columnConfig.cost) {
-    // For the widget, use the 3-decimal cost column
-    result.push(WIDGET_COST_COLUMN);
+  const visibleIds = new Set<string>();
+  if (columnConfig.sessions) visibleIds.add("sessions");
+  if (columnConfig.msgs) visibleIds.add("msgs");
+  if (columnConfig.cost) visibleIds.add("cost");
+  if (columnConfig.tokens) visibleIds.add("tokens");
+  if (columnConfig.tokensIn) visibleIds.add("tokensIn");
+  if (columnConfig.tokensOut) visibleIds.add("tokensOut");
+  if (columnConfig.cache) visibleIds.add("cache");
+
+  // Use configured columnOrder (or fall back to the order of appearance)
+  const order = columnConfig.columnOrder && columnConfig.columnOrder.length > 0
+    ? columnConfig.columnOrder
+    : Object.keys(columnMap);
+
+  const result: DataColumn[] = [];
+  for (const id of order) {
+    if (visibleIds.has(id) && columnMap[id]) {
+      result.push(columnMap[id]!);
+    }
   }
-  if (columnConfig.tokens) result.push(TOKENS_COLUMN);
-  if (columnConfig.tokensIn) result.push(INPUT_COLUMN);
-  if (columnConfig.tokensOut) result.push(OUTPUT_COLUMN);
-  if (columnConfig.cache) result.push(CACHE_COLUMN);
 
   return result;
 }
@@ -378,11 +398,11 @@ function renderDataRow(
   for (const col of layout.columns) {
     const value = fitCell(col.getValue(stats), col.width, "right");
     const elem = col.valueElement;
-    row += elem
+    row += " " + (elem
       ? colorFg(config, elem, value)
       : dimAll
         ? colorFg(config, "modelValue", value)
-        : value;
+        : value);
   }
 
   return row;
@@ -423,11 +443,11 @@ function renderDualNameRow(
   for (const col of layout.columns) {
     const value = fitCell(col.getValue(stats), col.width, "right");
     const elem = col.valueElement;
-    row += elem
+    row += " " + (elem
       ? colorFg(config, elem, value)
       : dimAll
         ? colorFg(config, "modelValue", value)
-        : value;
+        : value);
   }
 
   return row;
@@ -458,9 +478,9 @@ function renderTableHeader(
       colorFg(config, "modelHeader", modelHdr);
     for (const col of layout.columns) {
       const label = fitCell(col.label, col.width, "right");
-      headerLine += col.headerElement
+      headerLine += " " + (col.headerElement
         ? colorFg(config, col.headerElement, label)
-        : label;
+        : label);
     }
     lines.push(headerLine);
   } else {
@@ -471,9 +491,9 @@ function renderTableHeader(
     );
     for (const col of layout.columns) {
       const label = fitCell(col.label, col.width, "right");
-      headerLine += col.headerElement
+      headerLine += " " + (col.headerElement
         ? colorFg(config, col.headerElement, label)
-        : label;
+        : label);
     }
     lines.push(headerLine);
   }
@@ -505,7 +525,7 @@ function renderTotalsRow(
     for (const col of layout.columns) {
       const value = fitCell(col.getValue(totals), col.width, "right");
       const elem = col.valueElement ?? "title";
-      totalRow += colorFg(config, elem, value);
+      totalRow += " " + colorFg(config, elem, value);
     }
     lines.push(totalRow);
   } else {
@@ -516,7 +536,7 @@ function renderTotalsRow(
     for (const col of layout.columns) {
       const value = fitCell(col.getValue(totals), col.width, "right");
       const elem = col.valueElement ?? "title";
-      totalRow += colorFg(config, elem, value);
+      totalRow += " " + colorFg(config, elem, value);
     }
     lines.push(totalRow);
   }
