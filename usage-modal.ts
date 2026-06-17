@@ -54,8 +54,6 @@ interface TableLayout {
   compact: boolean;
 }
 
-const MAX_NAME_COL_WIDTH = 26;
-
 const SESSIONS_COLUMN: DataColumn = {
   label: "Sessions",
   width: 9,
@@ -113,7 +111,7 @@ const FULL_DATA_COLUMNS: DataColumn[] = [
 ];
 
 const TABLE_LAYOUTS: TableLayoutCandidate[] = [
-  { columns: FULL_DATA_COLUMNS, minNameWidth: MAX_NAME_COL_WIDTH },
+  { columns: FULL_DATA_COLUMNS, minNameWidth: 8 },
   {
     columns: [SESSIONS_COLUMN, MSGS_COLUMN, COST_COLUMN, TOKENS_COLUMN],
     minNameWidth: 14,
@@ -127,6 +125,9 @@ const TABLE_LAYOUTS: TableLayoutCandidate[] = [
   { columns: [COST_COLUMN, TOKENS_COLUMN], minNameWidth: 10, compact: true },
   { columns: [COST_COLUMN], minNameWidth: 8, compact: true },
 ];
+
+/** Minimum total width before the table degrades to a "narrow" message. */
+const MIN_TABLE_WIDTH = 20;
 
 // =============================================================================
 // Helpers
@@ -169,30 +170,46 @@ function pickFittingText(width: number, variants: string[]): string {
   return variants[variants.length - 1] || "";
 }
 
-function getTableLayout(width: number): TableLayout {
+/**
+ * Pick the best table layout for the available width.
+ *
+ * The name column is capped at maxProviderNameLen + 20 so it doesn't balloon
+ * on wide terminals.  On narrow terminals the cap naturally exceeds the
+ * remaining space, so the name fills whatever room is left.
+ *
+ * Returns null when the terminal is too narrow for even the smallest layout.
+ */
+function getTableLayout(
+  width: number,
+  maxProviderNameLen: number,
+): TableLayout | null {
   const safeWidth = Math.max(width, 0);
+  if (safeWidth < MIN_TABLE_WIDTH) return null;
+
+  // Dynamic cap: longest provider name + generous padding, at least 26
+  const nameCap = Math.max(maxProviderNameLen + 20, 26);
 
   for (const candidate of TABLE_LAYOUTS) {
     const columnsWidth = sumColumnWidths(candidate.columns);
-    const nameWidth = Math.min(
-      MAX_NAME_COL_WIDTH,
-      Math.max(safeWidth - columnsWidth, 0),
-    );
-    if (nameWidth >= candidate.minNameWidth) {
-      return {
-        columns: candidate.columns,
-        nameWidth,
-        tableWidth: nameWidth + columnsWidth,
-        compact: candidate.compact ?? false,
-      };
-    }
+    const remaining = safeWidth - columnsWidth;
+    if (remaining < candidate.minNameWidth) continue;
+    // Cap the name column so it doesn't balloon on wide terminals.
+    // On narrow terminals remaning < cap, so the name fills the line.
+    const nameWidth = Math.min(remaining, nameCap);
+    return {
+      columns: candidate.columns,
+      nameWidth,
+      tableWidth: nameWidth + columnsWidth,
+      compact: candidate.compact ?? false,
+    };
   }
 
+  // Fallback: use the smallest layout with whatever width fits
   const fallback = TABLE_LAYOUTS[TABLE_LAYOUTS.length - 1]!;
   const fallbackColumnsWidth = sumColumnWidths(fallback.columns);
-  const fallbackNameWidth = Math.min(
-    MAX_NAME_COL_WIDTH,
-    Math.max(safeWidth - fallbackColumnsWidth, 0),
+  const fallbackNameWidth = Math.max(
+    Math.min(safeWidth - fallbackColumnsWidth, nameCap),
+    0,
   );
   return {
     columns: fallback.columns,
@@ -319,11 +336,23 @@ export class UsageComponent {
   // -------------------------------------------------------------------------
 
   render(width: number): string[] {
+    // Longest provider name drives the dynamic name-column cap
+    let maxProviderNameLen = 8; // "Provider" header minimum
+    for (const name of this.providerOrder) {
+      if (name.length > maxProviderNameLen) maxProviderNameLen = name.length;
+    }
+
     if (this.viewMode === "insights") {
+      const dummyLayout: TableLayout = {
+        columns: [],
+        nameWidth: 0,
+        tableWidth: 0,
+        compact: false,
+      };
       return clampLines(
         [
           ...this.renderTitle(),
-          ...this.renderTabs(width, getTableLayout(width)),
+          ...this.renderTabs(width, dummyLayout),
           ...this.renderInsights(width),
           ...this.renderHelp(width),
         ],
@@ -331,7 +360,25 @@ export class UsageComponent {
       );
     }
 
-    const layout = getTableLayout(width);
+    const layout = getTableLayout(width, maxProviderNameLen);
+    if (!layout) {
+      return clampLines(
+        [
+          ...this.renderTitle(),
+          ...this.renderTabs(width, {
+            columns: [],
+            nameWidth: 0,
+            tableWidth: 0,
+            compact: false,
+          }),
+          this.theme.fg("dim", "  Terminal too narrow for table view."),
+          "",
+          ...this.renderHelp(width),
+        ],
+        width,
+      );
+    }
+
     return clampLines(
       [
         ...this.renderTitle(),
@@ -406,19 +453,60 @@ export class UsageComponent {
 
   private renderTabs(width: number, layout: TableLayout): string[] {
     const th = this.theme;
-    const fullTabs = SCOPE_ORDER.map((tab) => {
-      const label = TAB_LABELS[tab];
-      return tab === this.activeTab
-        ? th.fg("accent", `[${label}]`)
-        : th.fg("dim", ` ${label} `);
-    }).join("  ");
 
-    const activeTabOnly = th.fg("accent", `[${TAB_LABELS[this.activeTab]}]`);
-    const tabLine = pickFittingText(width, [
-      fullTabs,
-      `${activeTabOnly}  ${th.fg("dim", "[Tab/\u2190\u2192]")}`,
-      activeTabOnly,
-    ]);
+    const joiner = "  ";
+    const joinerWidth = joiner.length;
+
+    // Flow tabs onto lines, wrapping at tab boundaries so no scope is ever
+    // hidden.  Falls back to truncateToWidth only when a single tab label
+    // exceeds the available width.
+    //
+    // Track visible width via a running sum instead of calling visibleWidth
+    // on the accumulated string — combined ANSI sequences can confuse width
+    // measurement.
+    const tabLines: string[] = [];
+    let currentLine = "";
+    let currentLineWidth = 0;
+
+    for (const scope of SCOPE_ORDER) {
+      const label = TAB_LABELS[scope];
+      const styled =
+        scope === this.activeTab
+          ? th.fg("accent", `[${label}]`)
+          : th.fg("dim", ` ${label} `);
+      // Measure visible width from the plain label text, NOT from
+      // visibleWidth(styled) which can mis-measure ANSI escape codes
+      // (especially 24-bit color sequences from theme roles).
+      // Both active `[Label]` and inactive ` Label ` have label.length+2
+      // visible characters.
+      const tabWidth = label.length + 2;
+
+      const neededWidth =
+        currentLineWidth === 0
+          ? tabWidth
+          : currentLineWidth + joinerWidth + tabWidth;
+
+      if (neededWidth <= width) {
+        currentLine =
+          currentLine === "" ? styled : currentLine + joiner + styled;
+        currentLineWidth = neededWidth;
+      } else {
+        if (currentLine !== "") {
+          tabLines.push(currentLine);
+        }
+        if (tabWidth > width) {
+          currentLine = truncateToWidth(styled, width);
+          currentLineWidth = width;
+        } else {
+          currentLine = styled;
+          currentLineWidth = tabWidth;
+        }
+      }
+    }
+
+    if (currentLine !== "") {
+      tabLines.push(currentLine);
+    }
 
     const infoLines =
       this.viewMode === "table" && layout.compact
@@ -428,7 +516,7 @@ export class UsageComponent {
           )
         : [];
 
-    return [tabLine, ...infoLines, ""];
+    return [...tabLines, ...infoLines, ""];
   }
 
   private renderHeader(layout: TableLayout): string[] {

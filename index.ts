@@ -11,7 +11,7 @@ import type {
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
-import { CancellableLoader, Container, Spacer } from "@earendil-works/pi-tui";
+import { CancellableLoader, Container, Spacer, truncateToWidth } from "@earendil-works/pi-tui";
 import { getUsageData } from "./data-collection.js";
 import { loadConfig, saveConfig } from "./config-persistence.js";
 import { SettingsMenu } from "./settings-menu.js";
@@ -77,11 +77,11 @@ export default function (pi: ExtensionAPI) {
           render: (w: number) => {
             const borderLines = container
               .render(w)
-              .map((l) => l.slice(0, Math.max(w, 0)));
+              .map((l) => truncateToWidth(l, w));
             const usageLines = usage.render(w);
             const bottomBorder = theme.fg("border", "\u2500".repeat(w));
             return [...borderLines, ...usageLines, "", bottomBorder].map((l) =>
-              l.slice(0, Math.max(w, 0)),
+              truncateToWidth(l, w),
             );
           },
           invalidate: () => container.invalidate(),

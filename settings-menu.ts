@@ -197,6 +197,10 @@ interface ColorItem {
   overrideVal: string | null;
   /** Resolved color swatch (2-char ANSI block) */
   swatch: string;
+  /** When true, the item is rendered with strikethrough and is non-interactive. */
+  disabled?: boolean;
+  /** Short hint shown after the value when disabled (e.g. "disabled — Provider hidden in Layout"). */
+  disabledHint?: string;
 }
 
 // =============================================================================
@@ -562,8 +566,34 @@ export class SettingsMenu implements Component {
     const items: LayoutItem[] = [];
     const isSummary = mode === "summary";
 
-    // ---- Section: Settings (only if there are settings to show) ----
-    if (!isSummary) {
+    // ---- Section: Settings ----
+    if (isSummary) {
+      // Summary mode settings: display toggles for title, scope, separator
+      items.push({
+        type: "section",
+        id: "__settings__",
+        label: "Settings:",
+        value: "",
+      });
+      items.push({
+        type: "setting",
+        id: "showTitle",
+        label: "Usage Title",
+        value: columnConfig.showTitle ? "Show" : "Hide",
+      });
+      items.push({
+        type: "setting",
+        id: "showScope",
+        label: "Scope Label",
+        value: columnConfig.showScope ? "Show" : "Hide",
+      });
+      items.push({
+        type: "setting",
+        id: "showSeparator",
+        label: "Separator",
+        value: columnConfig.showSeparator ? "Show" : "Hide",
+      });
+    } else {
       items.push({
         type: "section",
         id: "__settings__",
@@ -594,6 +624,12 @@ export class SettingsMenu implements Component {
         label: "Footer Line",
         value: columnConfig.showFooterLine ? "Show" : "Hide",
       });
+      items.push({
+        type: "setting",
+        id: "showInOutArrows",
+        label: "In/Out Arrows",
+        value: columnConfig.showInOutArrows ? "Show" : "Hide",
+      });
     }
 
     // ---- Section: Columns ----
@@ -607,7 +643,7 @@ export class SettingsMenu implements Component {
     // Name columns (provider / model) — conditional on mode
     const isPerModel = mode === "Per Model";
     const showProvider = mode === "expanded" || isPerModel;
-    const showModel = mode === "expanded";
+    const showModel = mode === "expanded" || isPerModel;
 
     if (showProvider) {
       items.push({
@@ -646,6 +682,16 @@ export class SettingsMenu implements Component {
       }
     }
 
+    // For summary mode, add scope label as a reorderable pseudo-column
+    if (isSummary) {
+      items.push({
+        type: "column",
+        id: "scope",
+        label: "Scope",
+        value: columnConfig.showScope ? "Show" : "Hide",
+      });
+    }
+
     return items;
   }
 
@@ -654,6 +700,10 @@ export class SettingsMenu implements Component {
     const columnConfig = this.config.modes[mode];
     if (id === "showTotals") {
       columnConfig.showTotals = !columnConfig.showTotals;
+    } else if (id === "showInOutArrows") {
+      columnConfig.showInOutArrows = !columnConfig.showInOutArrows;
+    } else if (id === "scope") {
+      columnConfig.showScope = !columnConfig.showScope;
     } else if (id in columnConfig) {
       const key = id as keyof ModeColumnConfig;
       const current = columnConfig[key];
@@ -873,12 +923,51 @@ export class SettingsMenu implements Component {
           items.push({ type: "element", id: el, label, overrideVal, swatch });
         }
       } else if (isPerModel) {
-        const el = "modelValue" as ColorElement;
-        const label = ELEMENT_LABELS[el] ?? el;
-        const overrideVal =
-          (overrides as Record<string, string | null>)[el] ?? null;
-        const swatch = this.getResolvedColorSwatch(el, mode);
-        items.push({ type: "element", id: el, label, overrideVal, swatch });
+        // Per Model — both provider and model parts shown in combined column.
+        // When provider column is hidden, Provider Value and Separator are
+        // rendered "inactive" because only the model name is displayed.
+        const providerHidden = !columnConfig.provider;
+        for (const el of ["providerValue", "modelValue"] as ColorElement[]) {
+          const label = ELEMENT_LABELS[el] ?? el;
+          const overrideVal =
+            (overrides as Record<string, string | null>)[el] ?? null;
+          const swatch = this.getResolvedColorSwatch(el, mode);
+          const disabled = providerHidden && el === "providerValue";
+          items.push({
+            type: "element",
+            id: el,
+            label,
+            overrideVal,
+            swatch,
+            ...(disabled
+              ? {
+                  disabled: true,
+                  disabledHint: "disabled — Provider hidden in Layout",
+                }
+              : {}),
+          });
+        }
+        // Separator "/" between provider and model
+        {
+          const el = "separator" as ColorElement;
+          const label = ELEMENT_LABELS[el] ?? el;
+          const overrideVal =
+            (overrides as Record<string, string | null>)[el] ?? null;
+          const swatch = this.getResolvedColorSwatch(el, mode);
+          items.push({
+            type: "element",
+            id: el,
+            label,
+            overrideVal,
+            swatch,
+            ...(providerHidden
+              ? {
+                  disabled: true,
+                  disabledHint: "disabled — Provider hidden in Layout",
+                }
+              : {}),
+          });
+        }
       } else {
         // compact — provider value
         const el = "providerValue" as ColorElement;
@@ -1140,9 +1229,6 @@ export class SettingsMenu implements Component {
       lines.push(`  ${cursor} ${labelText} ${valueText}`);
     }
 
-    lines.push("  " + ac("dim", "─".repeat(Math.max(0, innerWidth))));
-    lines.push("");
-
     return lines;
   }
 
@@ -1168,27 +1254,45 @@ export class SettingsMenu implements Component {
       }
 
       const isSelected = i === this.colorCursor;
+      const isDisabled = item.disabled === true;
       const cursor = isSelected ? ac("accent", "▸ ") : "  ";
-      const swatch = item.swatch;
+      const swatch = isDisabled ? ac("dim", "··") : item.swatch;
 
       const isOverridden = item.overrideVal !== null && item.overrideVal !== "";
       const prefix = isOverridden ? "*" : " ";
-      const labelText = isSelected
-        ? ac("accent", `${prefix}${item.label}`.padEnd(18))
-        : ac("text", `${prefix}${item.label}`.padEnd(18));
 
-      const valueText = isOverridden
-        ? ac(isSelected ? "accent" : "text", item.overrideVal!)
-        : ac("dim", "(inherit)");
+      // Label with optional strikethrough for disabled items
+      let labelText: string;
+      if (isDisabled) {
+        const strikeLabel = this.theme.strikethrough(`${prefix}${item.label}`);
+        labelText = ac("dim", strikeLabel.padEnd(18));
+      } else if (isSelected) {
+        labelText = ac("accent", `${prefix}${item.label}`.padEnd(18));
+      } else {
+        labelText = ac("text", `${prefix}${item.label}`.padEnd(18));
+      }
+
+      // Value with optional disabled hint
+      let valueText: string;
+      if (isDisabled) {
+        valueText = ac("dim", item.disabledHint ?? "(disabled)");
+      } else if (isOverridden) {
+        valueText = ac(isSelected ? "accent" : "text", item.overrideVal!);
+      } else {
+        valueText = ac("dim", "(inherit)");
+      }
 
       lines.push(`  ${cursor} ${swatch} ${labelText} ${valueText}`);
     }
 
     lines.push("  " + ac("dim", "─".repeat(Math.max(0, innerWidth))));
-    lines.push("");
-    lines.push(
-      "  " + ac("dim", "Enter edit • d=reset • Tab=cycle preview • Esc back"),
-    );
+
+    let footerText =
+      "Enter edit • d=reset • Tab=cycle preview" +
+      (this.getCurrentModeTab() === "Per Model" ? " • p=toggle Provider" : "") +
+      " • Esc back";
+
+    lines.push("  " + ac("dim", this.centerText(width, footerText)));
 
     return lines;
   }
@@ -1216,7 +1320,11 @@ export class SettingsMenu implements Component {
 
     if (input === "\x1b[A" || input === "\x1bOA") {
       let newCursor = this.colorCursor - 1;
-      while (newCursor >= 0 && this.colorItems[newCursor]?.type === "section") {
+      while (
+        newCursor >= 0 &&
+        (this.colorItems[newCursor]?.type === "section" ||
+          this.colorItems[newCursor]?.disabled)
+      ) {
         newCursor--;
       }
       if (newCursor >= 0) {
@@ -1229,7 +1337,8 @@ export class SettingsMenu implements Component {
       let newCursor = this.colorCursor + 1;
       while (
         newCursor < this.colorItems.length &&
-        this.colorItems[newCursor]?.type === "section"
+        (this.colorItems[newCursor]?.type === "section" ||
+          this.colorItems[newCursor]?.disabled)
       ) {
         newCursor++;
       }
@@ -1241,13 +1350,41 @@ export class SettingsMenu implements Component {
     }
     if (input === "\r" || input === "\n") {
       const item = this.colorItems[this.colorCursor];
-      if (item && item.type === "element") {
+      if (item && item.type === "element" && !item.disabled) {
         this.openColorPicker(item.id as ColorElement, mode);
+      }
+      return;
+    }
+    // 'p' — toggle provider column visibility (Per Model mode)
+    if (input === "p" && mode === "Per Model") {
+      const columnConfig = this.config.modes["Per Model"];
+      if (columnConfig) {
+        columnConfig.provider = !columnConfig.provider;
+        saveConfig(this.config);
+        this.invalidatePreview();
+        // Rebuild color items with updated disabled state
+        this.colorItems = this.buildColorItems(mode);
+        // Reposition cursor if it's now on a disabled or section item
+        if (
+          this.colorCursor < this.colorItems.length &&
+          (this.colorItems[this.colorCursor]?.type === "section" ||
+            this.colorItems[this.colorCursor]?.disabled)
+        ) {
+          for (let i = 0; i < this.colorItems.length; i++) {
+            const ci = this.colorItems[i]!;
+            if (ci.type !== "section" && !ci.disabled) {
+              this.colorCursor = i;
+              break;
+            }
+          }
+        }
+        this.tui.requestRender();
       }
       return;
     }
     if (input === "d") {
       const item = this.colorItems[this.colorCursor];
+      if (item?.disabled) return;
       if (item && item.type === "section") {
         this.resetColorSection(item.id, mode);
       } else if (item && item.type === "element") {
@@ -1352,14 +1489,7 @@ export class SettingsMenu implements Component {
     const innerWidth = width - 4;
     const modes = [...DISPLAY_MODES, "hidden" as DisplayMode];
 
-    lines.push(
-      "  " +
-        this.theme.fg(
-          "dim",
-          "┌─ Widget Mode " + "─".repeat(Math.max(0, innerWidth - 16)),
-        ),
-    );
-    lines.push("");
+    lines.push("  " + this.theme.fg("dim", "Select Widget Mode: "));
 
     for (let i = 0; i < modes.length; i++) {
       const dm = modes[i]!;
@@ -1374,15 +1504,10 @@ export class SettingsMenu implements Component {
       lines.push("  " + cursor + text + check);
     }
 
-    lines.push("");
-    lines.push(
-      "  " +
-        this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))),
-    );
-    lines.push("");
-    lines.push(
-      "  " + this.theme.fg("dim", "↑↓ select • Enter confirm • Esc cancel"),
-    );
+    lines.push(this.theme.fg("dim", "─".repeat(Math.max(0, width))));
+
+    let hotkeysText = "↑↓ select • enter confirm • esc cancel";
+    lines.push(this.theme.fg("dim", this.centerText(width, hotkeysText)));
 
     return lines;
   }
@@ -1393,6 +1518,9 @@ export class SettingsMenu implements Component {
     if (input === "\x1b[A" || input === "\x1bOA") {
       if (this.selectedIndex > 0) {
         this.selectedIndex--;
+        this.previewModeOverride =
+          modes[this.selectedIndex] ?? this.config.defaultMode;
+        this.invalidatePreview();
         this.tui.requestRender();
       }
       return;
@@ -1400,6 +1528,9 @@ export class SettingsMenu implements Component {
     if (input === "\x1b[B" || input === "\x1bOB") {
       if (this.selectedIndex < modes.length - 1) {
         this.selectedIndex++;
+        this.previewModeOverride =
+          modes[this.selectedIndex] ?? this.config.defaultMode;
+        this.invalidatePreview();
         this.tui.requestRender();
       }
       return;
@@ -1438,15 +1569,6 @@ export class SettingsMenu implements Component {
       hidden: "Hidden",
     };
 
-    lines.push(
-      "  " +
-        this.theme.fg(
-          "dim",
-          "┌─ Active Modes " + "─".repeat(Math.max(0, innerWidth - 15)),
-        ),
-    );
-    lines.push("");
-
     for (let i = 0; i < modes.length; i++) {
       const mode = modes[i]!;
       const label = modeLabels[mode] ?? mode;
@@ -1471,10 +1593,13 @@ export class SettingsMenu implements Component {
       lines.push("  " + cursor + text);
     }
 
-    lines.push("");
+    // Descriptive footer
     lines.push(
       "  " +
-        this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))),
+        this.theme.fg(
+          "dim",
+          "Enabled modes appear in the Alt+Ctrl+U cycle list.",
+        ),
     );
 
     return lines;
@@ -1695,7 +1820,8 @@ export class SettingsMenu implements Component {
       ? this.theme.fg("accent", "Customize Layout")
       : this.theme.fg("text", "Customize Layout");
     const arrow1 = this.theme.fg("dim", " ▶");
-    lines.push(cursor1 + label1 + arrow1);
+    const resetHint1 = isSelected1 ? this.theme.fg("dim", "  d=reset") : "";
+    lines.push(cursor1 + label1 + arrow1 + resetHint1);
 
     // ---- Item 2: Customize Widget Colors ----
     const isSelected2 = this.selectedIndex === 2 && this.depth === 0;
@@ -1706,6 +1832,16 @@ export class SettingsMenu implements Component {
     const arrow2 = this.theme.fg("dim", " ▶");
     const resetHint2 = isSelected2 ? this.theme.fg("dim", "  d=reset") : "";
     lines.push(cursor2 + label2 + arrow2 + resetHint2);
+
+    // Descriptive footer
+    lines.push("");
+    lines.push(
+      "  " +
+        this.theme.fg(
+          "dim",
+          "When enabled, this mode appears in the Alt+Ctrl+U cycle list.",
+        ),
+    );
 
     return lines;
   }
@@ -1818,6 +1954,18 @@ export class SettingsMenu implements Component {
       : ac("text", activeModesLabel);
     const a3 = ac("dim", " ▶");
     lines.push(c3 + l3 + a3);
+
+    // Pi Hotkeys Legend
+    lines.push("");
+
+    lines.push(
+      "  " +
+        this.theme.fg(
+          "dim",
+          "Pi Hotkeys: Alt+U = Cycle time scope • Alt+Ctrl+U = Cycle display mode",
+        ),
+    );
+    //   lines.push(...this.renderPiHotkeys(width));
 
     return lines;
   }
@@ -1954,6 +2102,12 @@ export class SettingsMenu implements Component {
     return [line];
   }
 
+  private centerText(width: number, text: string): string {
+    if (width < text.length + 2) return "";
+    const leftPad = Math.floor((width - text.length) / 2);
+    return `${" ".repeat(leftPad) + text}`;
+  }
+
   private renderHintBar(width: number): string[] {
     let hints: string;
     if (this.depth === 1) {
@@ -1976,18 +2130,18 @@ export class SettingsMenu implements Component {
 
   private renderPreviewSection(width: number): string[] {
     const lines: string[] = [];
-    lines.push("");
     const previewMode = this.previewModeOverride ?? this.getActiveTabMode();
     const modeLabel =
       DISPLAY_MODE_LABELS[previewMode as DisplayMode] ?? previewMode;
     const suffix = ` - ${modeLabel}`;
-    const baseLen = 18 + suffix.length;
+    const baseLen = 16 + suffix.length;
     const previewLabel = this.theme.fg(
       "dim",
       "┌─ Live Preview" +
         suffix +
         " " +
-        "─".repeat(Math.max(0, width - baseLen)),
+        "─".repeat(Math.max(0, width - baseLen - 1)) +
+        "┐",
     );
     lines.push(previewLabel);
     const previewWidth = Math.max(0, width - 1);
@@ -1995,8 +2149,9 @@ export class SettingsMenu implements Component {
     for (const line of previewLines) {
       lines.push(" " + line);
     }
-    lines.push(this.theme.fg("dim", "└" + "─".repeat(Math.max(0, width - 1))));
-    lines.push("");
+    lines.push(
+      this.theme.fg("dim", "└" + "─".repeat(Math.max(0, width - 2)) + "┘"),
+    );
     return lines;
   }
 
@@ -2032,7 +2187,6 @@ export class SettingsMenu implements Component {
             "─".repeat(safeWidth - titlePad - title.length),
         ),
       );
-      lines.push("");
 
       // Live preview section
       lines.push(...this.renderPreviewSection(safeWidth));
@@ -2088,7 +2242,6 @@ export class SettingsMenu implements Component {
             "─".repeat(safeWidth - titlePad - title.length),
         ),
       );
-      lines.push("");
 
       // Live preview
       lines.push(...this.renderPreviewSection(safeWidth));
@@ -2102,7 +2255,7 @@ export class SettingsMenu implements Component {
       lines.push(this.theme.fg("dim", "─".repeat(safeWidth)));
       const hint = this.reorderMode
         ? "↑↓ move column • Enter done • Esc cancel reorder"
-        : "↑↓ select • Enter toggle • r reorder • Esc back";
+        : "↑↓ select • Enter toggle • r reorder • d reset all • Esc back";
       const leftPad = Math.floor((safeWidth - hint.length) / 2);
       lines.push(this.theme.fg("dim", " ".repeat(leftPad) + hint));
       lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
@@ -2128,7 +2281,6 @@ export class SettingsMenu implements Component {
             "─".repeat(safeWidth - titlePad - title.length),
         ),
       );
-      lines.push("");
 
       // Live preview
       lines.push(...this.renderPreviewSection(safeWidth));
@@ -2162,7 +2314,6 @@ export class SettingsMenu implements Component {
             "─".repeat(safeWidth - titlePad - title.length),
         ),
       );
-      lines.push("");
 
       // Live preview
       lines.push(...this.renderPreviewSection(safeWidth));
@@ -2173,7 +2324,6 @@ export class SettingsMenu implements Component {
         lines.push(line);
       }
 
-      lines.push("");
       lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
 
       return lines;
@@ -2197,7 +2347,6 @@ export class SettingsMenu implements Component {
             "─".repeat(safeWidth - titlePad - title.length),
         ),
       );
-      lines.push("");
 
       // Active modes picker list
       const pickerLines = this.renderActiveModesPicker(safeWidth);
@@ -2205,7 +2354,6 @@ export class SettingsMenu implements Component {
         lines.push(line);
       }
 
-      lines.push("");
       lines.push(this.theme.fg("dim", "─".repeat(safeWidth)));
       const hint = "Enter toggle • Esc back";
       const leftPad = Math.floor((safeWidth - hint.length) / 2);
@@ -2239,7 +2387,6 @@ export class SettingsMenu implements Component {
     lines.push(this.theme.fg("dim", "─".repeat(safeWidth)));
     lines.push(...this.renderTabBar(safeWidth));
     lines.push(this.theme.fg("dim", "─".repeat(safeWidth)));
-    lines.push("");
 
     // Tab content
     const contentLines = this.renderTabContent(safeWidth);
@@ -2248,7 +2395,6 @@ export class SettingsMenu implements Component {
     }
 
     // Footer
-    lines.push("");
     lines.push(this.theme.fg("dim", "─".repeat(safeWidth)));
     lines.push(...this.renderHintBar(safeWidth));
     lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
@@ -2458,6 +2604,33 @@ export class SettingsMenu implements Component {
       return;
     }
 
+    // "d" hotkey — reset all layout settings to defaults for this mode
+    if (input === "d" || input === "D") {
+      const defaultConfig = getDefaultConfig();
+      const defaultModeConfig = defaultConfig.modes[mode];
+      if (defaultModeConfig) {
+        this.config.modes[mode] = {
+          ...defaultModeConfig,
+          columnOrder: [
+            ...(defaultModeConfig.columnOrder ?? DEFAULT_COLUMN_ORDER),
+          ],
+        };
+        saveConfig(this.config);
+        this.layoutItems = this.buildCustomizeLayoutItems(mode);
+        this.invalidatePreview();
+        // Reset cursor to first non-section item
+        this.layoutCursor = 0;
+        for (let i = 0; i < this.layoutItems.length; i++) {
+          if (this.layoutItems[i]!.type !== "section") {
+            this.layoutCursor = i;
+            break;
+          }
+        }
+        this.tui.requestRender();
+      }
+      return;
+    }
+
     // "r" hotkey — enter reorder mode on a data column
     if (input === "r" || input === "R") {
       const item = this.layoutItems[this.layoutCursor];
@@ -2549,6 +2722,8 @@ export class SettingsMenu implements Component {
         this.depth = 1;
         this.selectedIndex = 0;
         this.activeSubMenu = "displayModePicker";
+        this.previewModeOverride = this.config.defaultMode;
+        this.invalidatePreview();
         this.tui.requestRender();
       } else if (this.globalNavIndex === 1) {
         // Time Scope — cycle forward
@@ -2638,7 +2813,22 @@ export class SettingsMenu implements Component {
 
       // d — reset selected navigator item
       if (input === "d") {
-        if (this.selectedIndex === 2) {
+        if (this.selectedIndex === 1) {
+          // Reset all layout settings to defaults for this mode
+          const defaultConfig = getDefaultConfig();
+          const defaultModeConfig = defaultConfig.modes[mode];
+          if (defaultModeConfig) {
+            this.config.modes[mode] = {
+              ...defaultModeConfig,
+              columnOrder: [
+                ...(defaultModeConfig.columnOrder ?? DEFAULT_COLUMN_ORDER),
+              ],
+            };
+            saveConfig(this.config);
+            this.invalidatePreview();
+            this.tui.requestRender();
+          }
+        } else if (this.selectedIndex === 2) {
           // Reset all per-mode color overrides
           this.config.perModeColorOverrides[mode] =
             getDefaultConfig().perModeColorOverrides[mode];

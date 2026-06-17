@@ -105,7 +105,7 @@ export type LegacyDisplayMode =
   | "detailed-expanded"
   | "hidden";
 
-export type TabName = "today" | "thisWeek" | "lastWeek" | "allTime";
+export type TabName = TimeScope;
 
 export type ViewMode = "table" | "insights";
 
@@ -135,12 +135,20 @@ export interface ModeColumnConfig {
   showHeaderLine: boolean;
   /** Show/hide footer separator line for this mode */
   showFooterLine: boolean;
+  /** Show/hide the "Usage:" title prefix (summary mode only) */
+  showTitle: boolean;
+  /** Show/hide the "(scope)" label (summary mode only) */
+  showScope: boolean;
+  /** Show/hide the stat separator character between stat values (summary mode only) */
+  showSeparator: boolean;
   /**
    * Column display order for data columns (sessions, msgs, cost, tokens,
    * tokensIn, tokensOut, cache). Name columns (provider, model) are not
    * included — they are always rendered first when applicable.
    */
   columnOrder: string[];
+  /** Prefix Token In/Out values with ↑/↓ arrows in non-summary modes. */
+  showInOutArrows: boolean;
 }
 
 /**

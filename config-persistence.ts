@@ -64,7 +64,11 @@ function defaultModeColumnConfig(): ModeColumnConfig {
     showHeaders: true,
     showHeaderLine: true,
     showFooterLine: true,
+    showTitle: true,
+    showScope: true,
+    showSeparator: true,
     columnOrder: [...DEFAULT_COLUMN_ORDER],
+    showInOutArrows: true,
   };
 }
 

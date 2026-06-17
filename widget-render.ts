@@ -28,6 +28,7 @@ import {
   formatNumber,
   formatScopeLabel,
 } from "./formatting.js";
+import { DEFAULT_COLUMN_ORDER } from "./config-persistence.js";
 import {
   resolveColor,
   getThemeHex,
@@ -181,8 +182,12 @@ function filterDataColumns(
     msgs: MSGS_COLUMN,
     cost: WIDGET_COST_COLUMN,
     tokens: TOKENS_COLUMN,
-    tokensIn: INPUT_COLUMN,
-    tokensOut: OUTPUT_COLUMN,
+    tokensIn: columnConfig.showInOutArrows
+      ? { ...INPUT_COLUMN, getValue: (s: BaseStats & { sessions: Set<string> | number }) => `\u2191${INPUT_COLUMN.getValue(s)}` }
+      : INPUT_COLUMN,
+    tokensOut: columnConfig.showInOutArrows
+      ? { ...OUTPUT_COLUMN, getValue: (s: BaseStats & { sessions: Set<string> | number }) => `\u2193${OUTPUT_COLUMN.getValue(s)}` }
+      : OUTPUT_COLUMN,
     cache: CACHE_COLUMN,
   };
 
@@ -275,6 +280,7 @@ function colorFg(
     theme?: Theme;
     highlightElement?: ColorElement;
     themeFgMap?: Record<string, string>;
+    mode?: DisplayMode;
   },
 ): string {
   const resolveOpts: ResolveColorOptions = {};
@@ -283,6 +289,9 @@ function colorFg(
   }
   if (options?.themeFgMap) {
     resolveOpts.themeFgMap = options.themeFgMap;
+  }
+  if (options?.mode) {
+    resolveOpts.mode = options.mode;
   }
   const result = wrap(resolveColor(element, config, resolveOpts), text);
   if (options?.theme && options?.highlightElement === element) {
@@ -319,6 +328,9 @@ function selectTableLayout(
       Math.max(safeWidth - columnsWidth, 0),
     );
 
+    // Each data column is preceded by " " in rendered output
+    const spacing = candidate.columns.length;
+
     if (hasSecondNameCol) {
       // Provider column gets ~40% of name budget, Model gets ~60%
       const providerNameWidth = Math.max(4, Math.floor(nameWidthBudget * 0.4));
@@ -329,7 +341,7 @@ function selectTableLayout(
           columns: candidate.columns,
           nameWidth: providerNameWidth,
           nameWidth2: modelNameWidth,
-          tableWidth: totalNameWidth + columnsWidth,
+          tableWidth: totalNameWidth + columnsWidth + spacing,
           compact: candidate.compact ?? false,
         };
       }
@@ -338,7 +350,7 @@ function selectTableLayout(
         return {
           columns: candidate.columns,
           nameWidth: nameWidthBudget,
-          tableWidth: nameWidthBudget + columnsWidth,
+          tableWidth: nameWidthBudget + columnsWidth + spacing,
           compact: candidate.compact ?? false,
         };
       }
@@ -352,6 +364,8 @@ function selectTableLayout(
     nameCap,
     Math.max(safeWidth - fallbackColumnsWidth, 0),
   );
+  // Each data column is preceded by " " in rendered output
+  const fallbackSpacing = fallback.columns.length;
 
   if (hasSecondNameCol) {
     const providerNameWidth = Math.max(4, Math.floor(fallbackNameWidth * 0.4));
@@ -360,7 +374,7 @@ function selectTableLayout(
       columns: fallback.columns,
       nameWidth: providerNameWidth,
       nameWidth2: modelNameWidth,
-      tableWidth: providerNameWidth + modelNameWidth + fallbackColumnsWidth,
+      tableWidth: providerNameWidth + modelNameWidth + fallbackColumnsWidth + fallbackSpacing,
       compact: fallback.compact ?? false,
     };
   }
@@ -368,7 +382,7 @@ function selectTableLayout(
   return {
     columns: fallback.columns,
     nameWidth: fallbackNameWidth,
-    tableWidth: fallbackNameWidth + fallbackColumnsWidth,
+    tableWidth: fallbackNameWidth + fallbackColumnsWidth + fallbackSpacing,
     compact: fallback.compact ?? false,
   };
 }
@@ -382,6 +396,7 @@ function renderSeparatorLine(
   config: UsageWidgetConfig,
   lineConfig: "headerLine" | "footerLine",
   tableWidth: number,
+  mode: DisplayMode,
   highlightElement?: ColorElement,
 ): string | null {
   const lineCfg = config[lineConfig];
@@ -389,7 +404,7 @@ function renderSeparatorLine(
 
   const char = lineCfg.character || "\u2500"; // ─ default
   const line = char.repeat(Math.max(tableWidth, 0));
-  return colorFg(config, lineConfig, line, { theme, highlightElement });
+  return colorFg(config, lineConfig, line, { theme, highlightElement, mode });
 }
 
 // =============================================================================
@@ -401,12 +416,25 @@ function renderDataRow(
   name: string,
   stats: BaseStats & { sessions: Set<string> | number },
   layout: TableLayout,
-  options: { indent?: number; dimAll?: boolean; prefix?: string } = {},
+  options: {
+    indent?: number;
+    dimAll?: boolean;
+    prefix?: string;
+    /** Second name part (model name) for combined "provider/model" rendering. */
+    namePart2?: string;
+    /** Separator between name parts (default "/"). Colored with "separator" element. */
+    nameSep?: string;
+    /** Ideal width for name part 1 (provider). Used for proportional split when namePart2 is set. */
+    namePart1Width?: number;
+    /** Ideal width for name part 2 (model). Used for proportional split when namePart2 is set. */
+    namePart2Width?: number;
+  } = {},
   config: UsageWidgetConfig,
+  mode: DisplayMode,
   highlightElement?: ColorElement,
 ): string {
-  const { indent = 0, dimAll = false, prefix } = options;
-  const opts = { theme, highlightElement };
+  const { indent = 0, dimAll = false, prefix, namePart2, nameSep = "/", namePart1Width, namePart2Width } = options;
+  const opts = { theme, highlightElement, mode };
 
   const rawPrefix = prefix ?? " ".repeat(indent);
   const safePrefix =
@@ -415,13 +443,40 @@ function renderDataRow(
       : "";
   const prefixWidth = visibleWidth(safePrefix);
   const innerNameWidth = Math.max(layout.nameWidth - prefixWidth, 0);
-  const truncName =
-    innerNameWidth > 0 ? truncateToWidth(name, innerNameWidth) : "";
-  const nameElement: ColorElement = dimAll ? "modelValue" : "providerValue";
-  const styledName =
-    innerNameWidth > 0
-      ? padRight(colorFg(config, nameElement, truncName, opts), innerNameWidth)
-      : "";
+
+  let styledName: string;
+
+  if (namePart2 && innerNameWidth > 0) {
+    // Two-part name: provider / model with separate colors
+    const sepStyled = colorFg(config, "separator", nameSep, opts);
+    const sepWidth = visibleWidth(nameSep);
+    // Split remaining width proportionally using ideal widths when available,
+    // fall back to 45/55 heuristic otherwise.
+    let part1Budget: number;
+    let part2Budget: number;
+    if (namePart1Width !== undefined && namePart2Width !== undefined) {
+      const ideal = namePart1Width + namePart2Width;
+      part1Budget = Math.max(1, Math.floor((innerNameWidth - sepWidth) * namePart1Width / ideal));
+      part2Budget = Math.max(1, innerNameWidth - part1Budget - sepWidth);
+    } else {
+      part1Budget = Math.max(1, Math.floor((innerNameWidth - sepWidth) * 0.45));
+      part2Budget = Math.max(1, innerNameWidth - part1Budget - sepWidth);
+    }
+    const part1Trunc = truncateToWidth(name, part1Budget);
+    const part2Trunc = truncateToWidth(namePart2, part2Budget);
+    const part1Styled = colorFg(config, "providerValue", part1Trunc, opts);
+    const part2Styled = colorFg(config, "modelValue", part2Trunc, opts);
+    // Right-pad the combined name to fill the full name width
+    const combined = part1Styled + sepStyled + part2Styled;
+    const combinedVis = visibleWidth(part1Trunc) + sepWidth + visibleWidth(part2Trunc);
+    styledName = combined + " ".repeat(Math.max(0, innerNameWidth - combinedVis));
+  } else if (innerNameWidth > 0) {
+    const truncName = truncateToWidth(name, innerNameWidth);
+    const nameElement: ColorElement = dimAll ? "modelValue" : "providerValue";
+    styledName = padRight(colorFg(config, nameElement, truncName, opts), innerNameWidth);
+  } else {
+    styledName = "";
+  }
 
   let row = safePrefix + styledName;
 
@@ -449,10 +504,11 @@ function renderDualNameRow(
   layout: TableLayout,
   options: { dimAll?: boolean } = {},
   config: UsageWidgetConfig,
+  mode: DisplayMode,
   highlightElement?: ColorElement,
 ): string {
   const { dimAll = false } = options;
-  const opts = { theme, highlightElement };
+  const opts = { theme, highlightElement, mode };
 
   // First column: provider
   const provTrunc =
@@ -494,11 +550,12 @@ function renderTableHeader(
   layout: TableLayout,
   providerColLabel: string,
   config: UsageWidgetConfig,
+  mode: DisplayMode,
   modelColLabel?: string,
   highlightElement?: ColorElement,
 ): string[] {
   const lines: string[] = [];
-  const opts = { theme, highlightElement };
+  const opts = { theme, highlightElement, mode };
 
   if (modelColLabel !== undefined) {
     // Dual name columns
@@ -546,11 +603,12 @@ function renderTotalsRow(
   layout: TableLayout,
   columnConfig: ModeColumnConfig,
   config: UsageWidgetConfig,
+  mode: DisplayMode,
   highlightElement?: ColorElement,
 ): string[] {
   const lines: string[] = [];
   const hasDualNames = layout.nameWidth2 !== undefined;
-  const opts = { theme, highlightElement };
+  const opts = { theme, highlightElement, mode };
 
   if (hasDualNames) {
     // Merge Provider & Model name cells into one spanned "Total" cell
@@ -592,62 +650,121 @@ function renderSummary(
   scope: TimeScope,
   _width: number,
   config: UsageWidgetConfig,
+  mode: DisplayMode,
   highlightElement?: ColorElement,
 ): string[] {
   const totals = data.totals;
-
-  if (totals.messages === 0) {
-    const label = formatScopeLabel(scope);
-    return [colorFg(config, "title", `Usage: --- (${label})`, { theme, highlightElement })];
-  }
-
-  // Build colored parts array: each part is [colorElement, text]
-  const parts: Array<[ColorElement, string]> = [];
-
-  if (columnConfig.sessions) {
-    parts.push(["sessionsValue", `${formatNumber(totals.sessions)} sessions`]);
-  }
-  if (columnConfig.msgs) {
-    parts.push(["msgsValue", `${formatNumber(totals.messages)} msgs`]);
-  }
-  if (columnConfig.cost) {
-    parts.push(["costValue", formatCostFixed3(totals.cost)]);
-  }
-  if (columnConfig.tokens) {
-    parts.push(["tokensValue", `${formatTokens(totals.tokens.total)} tokens`]);
-  }
-  if (columnConfig.tokensIn) {
-    parts.push([
-      "tokensInValue",
-      `\u2191${formatTokens(totals.tokens.input + totals.tokens.cacheWrite)}`,
-    ]);
-  }
-  if (columnConfig.tokensOut) {
-    parts.push(["tokensOutValue", `\u2193${formatTokens(totals.tokens.output)}`]);
-  }
-  if (columnConfig.cache) {
-    parts.push([
-      "cacheValue",
-      `${formatTokens(totals.tokens.cacheRead + totals.tokens.cacheWrite)} cache`,
-    ]);
-  }
-
-  // Build the line with colored parts and separator between them
-  const sep = colorFg(config, "separator", " \u00b7 ", { theme, highlightElement });
-  const joined =
-    parts.length > 0
-      ? parts.map(([el, text]) => colorFg(config, el, text, { theme, highlightElement })).join(sep)
-      : "";
-
   const scopeLabel = formatScopeLabel(scope);
 
-  return [
-    colorFg(config, "title", "Usage: ", { theme, highlightElement }) +
-      joined +
-      (joined
-        ? colorFg(config, "scope", ` (${scopeLabel})`, { theme, highlightElement })
-        : colorFg(config, "scope", `(${scopeLabel})`, { theme, highlightElement })),
-  ];
+  // Build empty-state line respecting visibility flags
+  if (totals.messages === 0) {
+    let emptyLine = "";
+    if (columnConfig.showTitle) {
+      emptyLine += colorFg(config, "title", "Usage: ---", { theme, highlightElement, mode });
+    }
+    if (columnConfig.showScope) {
+      const parens = emptyLine ? ` (${scopeLabel})` : `(${scopeLabel})`;
+      emptyLine += colorFg(config, "scope", parens, { theme, highlightElement, mode });
+    }
+    return [emptyLine || "Usage: ---"];
+  }
+
+  // Build a map of column id → [colorElement, formattedText]
+  const colParts: Record<string, [ColorElement, string]> = {};
+
+  if (columnConfig.sessions) {
+    colParts["sessions"] = [
+      "sessionsValue",
+      `${formatNumber(totals.sessions)} sessions`,
+    ];
+  }
+  if (columnConfig.msgs) {
+    colParts["msgs"] = [
+      "msgsValue",
+      `${formatNumber(totals.messages)} msgs`,
+    ];
+  }
+  if (columnConfig.cost) {
+    colParts["cost"] = ["costValue", formatCostFixed3(totals.cost)];
+  }
+  if (columnConfig.tokens) {
+    colParts["tokens"] = [
+      "tokensValue",
+      `${formatTokens(totals.tokens.total)} tokens`,
+    ];
+  }
+  if (columnConfig.tokensIn) {
+    colParts["tokensIn"] = [
+      "tokensInValue",
+      `\u2191${formatTokens(totals.tokens.input + totals.tokens.cacheWrite)}`,
+    ];
+  }
+  if (columnConfig.tokensOut) {
+    colParts["tokensOut"] = [
+      "tokensOutValue",
+      `\u2193${formatTokens(totals.tokens.output)}`,
+    ];
+  }
+  if (columnConfig.cache) {
+    colParts["cache"] = [
+      "cacheValue",
+      `${formatTokens(totals.tokens.cacheRead + totals.tokens.cacheWrite)} cache`,
+    ];
+  }
+
+  // Build ordered parts array respecting columnOrder (user's configured reorder).
+  // The "scope" pseudo-column can appear anywhere in the order and outputs the
+  // scope label in that position. If scope is not in the order (backward compat),
+  // it is appended at the end.
+  const order = columnConfig.columnOrder && columnConfig.columnOrder.length > 0
+    ? columnConfig.columnOrder
+    : DEFAULT_COLUMN_ORDER;
+
+  const parts: Array<[ColorElement, string]> = [];
+  let scopeEmitted = false;
+
+  for (const colId of order) {
+    if (colId === "scope" && columnConfig.showScope) {
+      parts.push(["scope", `(${scopeLabel})`]);
+      scopeEmitted = true;
+    } else {
+      const entry = colParts[colId];
+      if (entry) {
+        parts.push(entry);
+      }
+    }
+  }
+
+  // Backward compat: if scope is visible but not in columnOrder, append at end
+  if (columnConfig.showScope && !scopeEmitted) {
+    parts.push(["scope", `(${scopeLabel})`]);
+  }
+
+  // Build the joined stats string with optional separator
+  const sep = columnConfig.showSeparator
+    ? colorFg(config, "separator", " \u00b7 ", { theme, highlightElement, mode })
+    : " ";
+  const joined =
+    parts.length > 0
+      ? parts
+          .map(([el, text]) =>
+            colorFg(config, el, text, { theme, highlightElement, mode }),
+          )
+          .join(sep)
+      : "";
+
+  // Build the output line
+  let line = "";
+
+  // Title prefix
+  if (columnConfig.showTitle) {
+    line += colorFg(config, "title", "Usage: ", { theme, highlightElement, mode });
+  }
+
+  // Stats (now includes scope label at configured position)
+  line += joined;
+
+  return [line];
 }
 
 // =============================================================================
@@ -661,11 +778,12 @@ function renderCompact(
   scope: TimeScope,
   width: number,
   config: UsageWidgetConfig,
+  mode: DisplayMode,
   highlightElement?: ColorElement,
 ): string[] {
   if (data.totals.messages === 0) {
     return [
-      colorFg(config, "title", `Usage: --- (${formatScopeLabel(scope)})`),
+      colorFg(config, "title", `Usage: --- (${formatScopeLabel(scope)})`, { mode }),
     ];
   }
 
@@ -690,7 +808,7 @@ function renderCompact(
         (a, b) => b[1].cost - a[1].cost,
       );
       for (const [provider] of providers) {
-        lines.push(colorFg(config, "providerValue", "  " + provider));
+        lines.push(colorFg(config, "providerValue", "  " + provider, { mode }));
       }
     }
     return lines;
@@ -709,11 +827,12 @@ function renderCompact(
 
   if (!columnConfig.provider) {
     layout.nameWidth = 0;
+    layout.tableWidth = sumColumnWidths(layout.columns) + layout.columns.length;
   }
 
   // Header
   if (columnConfig.showHeaders && columnConfig.provider) {
-    lines.push(...renderTableHeader(theme, layout, headerLabel, config, undefined, highlightElement));
+    lines.push(...renderTableHeader(theme, layout, headerLabel, config, mode, undefined, highlightElement));
   }
 
   // Header separator
@@ -723,6 +842,7 @@ function renderCompact(
       config,
       "headerLine",
       layout.tableWidth,
+      mode,
       highlightElement,
     );
     if (headerSep !== null) lines.push(headerSep);
@@ -734,10 +854,10 @@ function renderCompact(
   );
 
   if (providers.length === 0) {
-    lines.push(colorFg(config, "title", "  No usage data for this period", { theme, highlightElement }));
+    lines.push(colorFg(config, "title", "  No usage data for this period", { theme, highlightElement, mode }));
   } else if (columnConfig.provider) {
     for (const [providerName, providerStats] of providers) {
-      const prefix = colorFg(config, "providerValue", "\u25b8 ", { theme, highlightElement });
+      const prefix = colorFg(config, "providerValue", "\u25b8 ", { theme, highlightElement, mode });
       lines.push(
         renderDataRow(
           theme,
@@ -746,6 +866,7 @@ function renderCompact(
           layout,
           { prefix },
           config,
+          mode,
           highlightElement,
         ),
       );
@@ -753,7 +874,7 @@ function renderCompact(
   } else {
     // No provider column — show just data columns
     for (const [, providerStats] of providers) {
-      lines.push(renderDataRow(theme, "", providerStats, layout, {}, config, highlightElement));
+      lines.push(renderDataRow(theme, "", providerStats, layout, {}, config, mode, highlightElement));
     }
   }
 
@@ -764,6 +885,7 @@ function renderCompact(
       config,
       "footerLine",
       layout.tableWidth,
+      mode,
       highlightElement,
     );
     if (footerSep !== null) lines.push(footerSep);
@@ -772,7 +894,7 @@ function renderCompact(
   // Totals
   if (columnConfig.showTotals) {
     lines.push(
-      ...renderTotalsRow(theme, data.totals, layout, columnConfig, config, highlightElement),
+      ...renderTotalsRow(theme, data.totals, layout, columnConfig, config, mode, highlightElement),
     );
   }
 
@@ -790,11 +912,12 @@ function renderPerModel(
   scope: TimeScope,
   width: number,
   config: UsageWidgetConfig,
+  mode: DisplayMode,
   highlightElement?: ColorElement,
 ): string[] {
   if (data.totals.messages === 0) {
     return [
-      colorFg(config, "title", `Usage: --- (${formatScopeLabel(scope)})`),
+      colorFg(config, "title", `Usage: --- (${formatScopeLabel(scope)})`, { mode }),
     ];
   }
 
@@ -804,30 +927,36 @@ function renderPerModel(
   const scopeLabel = formatScopeLabel(scope);
   const headerLabel = `Usage (${scopeLabel})`;
 
-  // Per-Model always shows both provider and model as a combined "provider/model" column.
-  // The Provider and Model toggles only affect Per-Provider and Provider+Model modes.
-  const showProvider = true;
-  const showModel = true;
+  const showProvider = columnConfig.provider;
+  const showModel = columnConfig.model;
+  const showCombined = showProvider && showModel;
 
   // Flatten all models from all providers, sorted by cost descending.
-  // Pre-compute the combined display name once per entry.
   interface ModelEntry {
-    name: string; // "provider/model", "provider", or "model"
+    name: string; // display name (provider/model, provider, or model)
+    providerName?: string; // separate provider name for two-part coloring
+    modelName?: string; // separate model name for two-part coloring
     stats: ModelStats;
   }
 
   const models: ModelEntry[] = [];
   for (const [providerName, providerStats] of data.providers) {
     for (const [modelName, modelStats] of providerStats.models) {
-      const name =
-        showProvider && showModel
-          ? `${providerName}/${modelName}`
-          : showProvider
-            ? providerName
-            : showModel
-              ? modelName
-              : "";
-      models.push({ name, stats: modelStats });
+      const entry: ModelEntry = { stats: modelStats };
+      if (showCombined) {
+        entry.name = `${providerName}/${modelName}`;
+        entry.providerName = providerName;
+        entry.modelName = modelName;
+      } else if (showProvider) {
+        entry.name = providerName;
+        entry.providerName = providerName;
+      } else if (showModel) {
+        entry.name = modelName;
+        entry.modelName = modelName;
+      } else {
+        entry.name = "";
+      }
+      models.push(entry);
     }
   }
   models.sort((a, b) => b.stats.cost - a.stats.cost);
@@ -840,10 +969,29 @@ function renderPerModel(
     return lines;
   }
 
-  // Compute dynamic max name width from the pre-computed combined names
-  let maxNameLen = 4;
+  // Compute max lengths for provider and model names independently.
+  // Using independent maxes ensures the column accommodates the longest
+  // provider and the longest model even when they come from different entries.
+  let maxProviderLen = 4;
+  let maxModelLen = 4;
   for (const entry of models) {
-    maxNameLen = Math.max(maxNameLen, visibleWidth(entry.name));
+    if (entry.providerName) {
+      maxProviderLen = Math.max(maxProviderLen, visibleWidth(entry.providerName));
+    }
+    if (entry.modelName) {
+      maxModelLen = Math.max(maxModelLen, visibleWidth(entry.modelName));
+    }
+  }
+
+  let maxNameLen: number;
+  if (showCombined) {
+    maxNameLen = maxProviderLen + 1 + maxModelLen; // +1 for "/" separator
+  } else if (showProvider) {
+    maxNameLen = maxProviderLen;
+  } else if (showModel) {
+    maxNameLen = maxModelLen;
+  } else {
+    maxNameLen = 4;
   }
 
   let layout: TableLayout;
@@ -855,13 +1003,14 @@ function renderPerModel(
     fitDynamicNameWidth(layout, maxNameLen + 1, width, headerLabel);
 
     if (columnConfig.showHeaders) {
-      lines.push(...renderTableHeader(theme, layout, headerLabel, config, undefined, highlightElement));
+      lines.push(...renderTableHeader(theme, layout, headerLabel, config, mode, undefined, highlightElement));
     }
   } else {
     // No name columns — just data
     const candidates = buildLayoutCandidates(columns);
     layout = selectTableLayout(candidates, width, false);
     layout.nameWidth = 0;
+    layout.tableWidth = sumColumnWidths(layout.columns) + layout.columns.length;
   }
 
   // Header separator
@@ -871,22 +1020,48 @@ function renderPerModel(
       config,
       "headerLine",
       layout.tableWidth,
+      mode,
       highlightElement,
     );
     if (headerSep !== null) lines.push(headerSep);
   }
 
   if (models.length === 0) {
-    lines.push(colorFg(config, "title", "  No usage data for this period", { theme, highlightElement }));
+    lines.push(colorFg(config, "title", "  No usage data for this period", { theme, highlightElement, mode }));
   } else {
     for (const entry of models) {
       if (showProvider || showModel) {
+        const rowOpts: {
+          namePart2?: string;
+          nameSep?: string;
+          dimAll?: boolean;
+          namePart1Width?: number;
+          namePart2Width?: number;
+        } = {};
+        if (showCombined && entry.providerName && entry.modelName) {
+          rowOpts.namePart2 = entry.modelName;
+          rowOpts.nameSep = "/";
+          rowOpts.namePart1Width = maxProviderLen;
+          rowOpts.namePart2Width = maxModelLen;
+        } else if (showModel && !showProvider) {
+          // Only model shown — use modelValue for the name
+          rowOpts.dimAll = true;
+        }
         lines.push(
-          renderDataRow(theme, entry.name, entry.stats, layout, {}, config, highlightElement),
+          renderDataRow(
+            theme,
+            showCombined ? (entry.providerName ?? entry.name) : entry.name,
+            entry.stats,
+            layout,
+            rowOpts,
+            config,
+            mode,
+            highlightElement,
+          ),
         );
       } else {
         // No name columns — just data columns
-        const opts = { theme, highlightElement };
+        const opts = { theme, highlightElement, mode };
         let row = "";
         for (const col of layout.columns) {
           const value = fitCell(col.getValue(entry.stats), col.width, "right");
@@ -905,6 +1080,7 @@ function renderPerModel(
       config,
       "footerLine",
       layout.tableWidth,
+      mode,
       highlightElement,
     );
     if (footerSep !== null) lines.push(footerSep);
@@ -913,7 +1089,7 @@ function renderPerModel(
   // Totals
   if (columnConfig.showTotals) {
     lines.push(
-      ...renderTotalsRow(theme, data.totals, layout, columnConfig, config, highlightElement),
+      ...renderTotalsRow(theme, data.totals, layout, columnConfig, config, mode, highlightElement),
     );
   }
 
@@ -931,11 +1107,12 @@ function renderExpanded(
   scope: TimeScope,
   width: number,
   config: UsageWidgetConfig,
+  mode: DisplayMode,
   highlightElement?: ColorElement,
 ): string[] {
   if (data.totals.messages === 0) {
     return [
-      colorFg(config, "title", `Usage: --- (${formatScopeLabel(scope)})`),
+      colorFg(config, "title", `Usage: --- (${formatScopeLabel(scope)})`, { mode }),
     ];
   }
 
@@ -964,7 +1141,7 @@ function renderExpanded(
     for (const [providerName, providerStats] of providers) {
       if (showProvider) {
         lines.push(
-          colorFg(config, "providerValue", "  \u25be ") + providerName,
+          colorFg(config, "providerValue", "  \u25be ", { mode }) + providerName,
         );
       }
       if (showModel) {
@@ -972,7 +1149,7 @@ function renderExpanded(
           (a, b) => b[1].cost - a[1].cost,
         );
         for (const [modelName] of providerModels) {
-          lines.push(colorFg(config, "modelValue", "      " + modelName));
+          lines.push(colorFg(config, "modelValue", "      " + modelName, { mode }));
         }
       }
     }
@@ -998,11 +1175,12 @@ function renderExpanded(
 
   if (!showProvider && !showModel) {
     layout.nameWidth = 0;
+    layout.tableWidth = sumColumnWidths(layout.columns) + layout.columns.length;
   }
 
   // Header
   if (columnConfig.showHeaders) {
-    lines.push(...renderTableHeader(theme, layout, headerLabel, config, undefined, highlightElement));
+    lines.push(...renderTableHeader(theme, layout, headerLabel, config, mode, undefined, highlightElement));
   }
 
   // Header separator
@@ -1012,6 +1190,7 @@ function renderExpanded(
       config,
       "headerLine",
       layout.tableWidth,
+      mode,
       highlightElement,
     );
     if (headerSep !== null) lines.push(headerSep);
@@ -1023,11 +1202,11 @@ function renderExpanded(
   );
 
   if (providers.length === 0) {
-    lines.push(colorFg(config, "title", "  No usage data for this period", { theme, highlightElement }));
+    lines.push(colorFg(config, "title", "  No usage data for this period", { theme, highlightElement, mode }));
   } else {
     for (const [providerName, providerStats] of providers) {
       if (showProvider) {
-        const prefix = colorFg(config, "providerValue", "\u25be ", { theme, highlightElement });
+        const prefix = colorFg(config, "providerValue", "\u25be ", { theme, highlightElement, mode });
         lines.push(
           renderDataRow(
             theme,
@@ -1036,6 +1215,7 @@ function renderExpanded(
             layout,
             { prefix },
             config,
+            mode,
             highlightElement,
           ),
         );
@@ -1054,6 +1234,7 @@ function renderExpanded(
               layout,
               { indent: showProvider ? 4 : 0, dimAll: true },
               config,
+              mode,
               highlightElement,
             ),
           );
@@ -1069,6 +1250,7 @@ function renderExpanded(
       config,
       "footerLine",
       layout.tableWidth,
+      mode,
       highlightElement,
     );
     if (footerSep !== null) lines.push(footerSep);
@@ -1077,7 +1259,7 @@ function renderExpanded(
   // Totals
   if (columnConfig.showTotals) {
     lines.push(
-      ...renderTotalsRow(theme, data.totals, layout, columnConfig, config, highlightElement),
+      ...renderTotalsRow(theme, data.totals, layout, columnConfig, config, mode, highlightElement),
     );
   }
 
@@ -1111,7 +1293,8 @@ function fitDynamicNameWidth(
   if (fullTotal <= availableWidth) {
     // Everything fits at full width — use natural widths, extra space stays on the right
     layout.nameWidth = minNameWidth;
-    layout.tableWidth = fullTotal;
+    // + layout.columns.length accounts for " " prefix before each data column
+    layout.tableWidth = fullTotal + layout.columns.length;
     return;
   }
 
@@ -1138,7 +1321,8 @@ function fitDynamicNameWidth(
 
   layout.columns = slimmed;
   layout.nameWidth = clampedMin;
-  layout.tableWidth = layout.nameWidth + sumColumnWidths(layout.columns);
+  // + slimmed.length accounts for " " prefix before each data column
+  layout.tableWidth = layout.nameWidth + sumColumnWidths(slimmed) + slimmed.length;
 }
 
 function buildLayoutCandidates(
@@ -1266,6 +1450,7 @@ export function renderWidget(
         activeScope,
         safeWidth,
         config,
+        resolvedMode,
         highlightElement,
       );
       break;
@@ -1278,6 +1463,7 @@ export function renderWidget(
         activeScope,
         safeWidth,
         config,
+        resolvedMode,
         highlightElement,
       );
       break;
@@ -1290,6 +1476,7 @@ export function renderWidget(
         activeScope,
         safeWidth,
         config,
+        resolvedMode,
         highlightElement,
       );
       break;
@@ -1302,6 +1489,7 @@ export function renderWidget(
         activeScope,
         safeWidth,
         config,
+        resolvedMode,
         highlightElement,
       );
       break;
