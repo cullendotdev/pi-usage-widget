@@ -2,9 +2,9 @@
  * Settings menu TUI — interactive `/usage-settings` command.
  *
  * Renders a 5-tab shell with live preview pane. Multi-level submenu navigation:
- *   - Global tab: display mode, time scope, theme preset, Colors submenu
- *   - Mode tabs: Theme Override, Columns submenu, Colors submenu
- *   - Colors split into Headers and Values sub-submenus
+ *   - Global tab: display mode, time scope, Customize Widget Colors
+ *   - Mode tabs: Customize Layout, Theme Override, Customize Widget Colors
+ *   - Colors shown as a flat section-based list (like Customize Layout)
  *   - Color picker for per-element color editing
  *
  * Exports:
@@ -18,6 +18,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   loadConfig,
   saveConfig,
+  getDefaultConfig,
   DEFAULT_COLUMN_ORDER,
 } from "./config-persistence.js";
 import { renderWidget } from "./widget-render.js";
@@ -26,15 +27,14 @@ import type {
   UsageData,
   DisplayMode,
   TimeScope,
-  ThemedPreset,
   ModeColumnConfig,
   ColorOverrides,
 } from "./types.js";
 import {
-  colorPresets,
   colorElements,
   resolveColor,
   hexToAnsi,
+  DEFAULT_THEME_ROLE_MAP,
 } from "./color-engine.js";
 import type { ColorElement } from "./color-engine.js";
 import {
@@ -42,6 +42,7 @@ import {
   ELEMENT_LABELS,
   renderColorSwatch,
   validateHex,
+  renderAnsiSwatch,
 } from "./color-picker.js";
 
 // =============================================================================
@@ -72,15 +73,6 @@ const TIME_SCOPES: TimeScope[] = [
   "thisMonth",
   "allTime",
 ];
-const THEMED_PRESETS: ThemedPreset[] = [
-  "default",
-  "tokyo-night",
-  "dracula",
-  "gruvbox",
-  "nord",
-  "catppuccin",
-  "monokai",
-];
 
 const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
   summary: "Summary",
@@ -98,16 +90,6 @@ const TIME_SCOPE_LABELS: Record<TimeScope, string> = {
   lastWeek: "Last Week",
   thisMonth: "This Month",
   allTime: "All Time",
-};
-
-const PRESET_LABELS: Record<ThemedPreset, string> = {
-  default: "Default",
-  "tokyo-night": "Tokyo Night",
-  dracula: "Dracula",
-  gruvbox: "Gruvbox",
-  nord: "Nord",
-  catppuccin: "Catppuccin",
-  monokai: "Monokai",
 };
 
 // =============================================================================
@@ -206,6 +188,17 @@ interface LayoutItem {
   value: string; // "Show" | "Hide" | "" (empty for section headers)
 }
 
+/** Item in the flattened Customize Widget Colors list. */
+interface ColorItem {
+  type: "section" | "element";
+  id: string; // section label text or ColorElement key
+  label: string; // display label
+  /** Current override value (null = inherit from parent level) */
+  overrideVal: string | null;
+  /** Resolved color swatch (2-char ANSI block) */
+  swatch: string;
+}
+
 // =============================================================================
 // Navigator depth tracking
 // =============================================================================
@@ -214,12 +207,8 @@ type NavDepth = 0 | 1 | 2;
 
 /** Which submenu is active at depth 1. */
 type SubMenuType =
-  | "themeOverride"
   | "columns"
-  | "colors"
-  | "colorsHeaders"
-  | "colorsValues"
-  | "presetPicker"
+  | "colorsFlat"
   | "displayModePicker"
   | "activeModes";
 
@@ -502,6 +491,12 @@ export class SettingsMenu implements Component {
   /** Saved column order before entering reorder mode (restored on Esc cancel). */
   private originalColumnOrder: string[] = [];
 
+  // Customize Widget Colors submenu state (flat section-based list)
+  private colorItems: ColorItem[] = [];
+  private colorCursor: number = 0;
+  /** Preview mode override — cycles via Tab on the colors screen (null = use active tab mode). */
+  private previewModeOverride: DisplayMode | null = null;
+
   // Cached values for the preview
   private previewCache: string[] = [];
   private previewCacheWidth = -1;
@@ -513,15 +508,17 @@ export class SettingsMenu implements Component {
   private editingElement: ColorElement | null = null;
   /** Which mode's override is being edited (null = global) */
   private editingMode: DisplayMode | null = null;
+  /** Tentative config with hovered color applied (for live preview during picker) */
+  private tentativeConfig: UsageWidgetConfig | null = null;
+  /** Element being highlighted in the tentative preview */
+  private tentativeElement: ColorElement | null = null;
 
   // Navigator state (shared between Global and Mode tabs)
   private depth: NavDepth = 0;
   private selectedIndex = 0;
   private activeSubMenu: SubMenuType | null = null;
-  /** For Global tab: selected navigator index (0=Display Mode, 1=Time Scope, 2=Theme Preset, 3=Colors). */
+  /** For Global tab: selected navigator index (0=Display Mode, 1=Time Scope, 2=Customize Widget Colors). */
   private globalNavIndex = 0;
-  /** Transient preview preset for live preview hover effect (null = use saved config). */
-  private previewPreset: ThemedPreset | null = null;
 
   constructor(
     theme: Theme,
@@ -667,6 +664,340 @@ export class SettingsMenu implements Component {
     saveConfig(this.config);
     this.invalidatePreview();
     // Caller is responsible for rebuilding items and requesting render
+  }
+
+  /**
+   * Build the flat color items list for the Customize Widget Colors submenu.
+   * Summary mode: single "Elements" section.
+   * Other modes: "Headers" and "Values" sections.
+   * Only shows elements for visible columns.
+   */
+  private buildColorItems(mode: DisplayMode | null): ColorItem[] {
+    const items: ColorItem[] = [];
+    const isSummary = mode === "summary";
+    const overrides = mode
+      ? this.config.perModeColorOverrides[mode]
+      : this.config.globalColorOverrides;
+
+    if (mode === null) {
+      // Global tab — show all elements since global overrides apply to all modes.
+      // Split into two sections: Common + Headers, and Values.
+
+      // ---- Common + Headers ----
+      items.push({
+        type: "section",
+        id: "__common__",
+        label: "Common & Headers",
+        overrideVal: null,
+        swatch: "",
+      });
+
+      const common: ColorElement[] = [
+        "title",
+        "scope",
+        "separator",
+        "totalLabel",
+        "providerHeader",
+        "modelHeader",
+        "sessionsHeader",
+        "msgsHeader",
+        "costHeader",
+        "tokensHeader",
+        "tokensInHeader",
+        "tokensOutHeader",
+        "cacheHeader",
+        "headerLine",
+        "footerLine",
+      ];
+      for (const el of common) {
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, null);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+
+      // ---- Values ----
+      items.push({
+        type: "section",
+        id: "__values__",
+        label: "Values",
+        overrideVal: null,
+        swatch: "",
+      });
+
+      const values: ColorElement[] = [
+        "providerValue",
+        "modelValue",
+        "sessionsValue",
+        "msgsValue",
+        "costValue",
+        "tokensValue",
+        "tokensInValue",
+        "tokensOutValue",
+        "cacheValue",
+      ];
+      for (const el of values) {
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, null);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+    } else if (isSummary) {
+      // Single section: Elements
+      items.push({
+        type: "section",
+        id: "__elements__",
+        label: "Elements",
+        overrideVal: null,
+        swatch: "",
+      });
+
+      // Always include title, scope, separator
+      for (const el of ["title", "scope", "separator"] as ColorElement[]) {
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, mode);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+
+      // Visible column values only
+      const columnConfig = mode
+        ? this.config.modes[mode]
+        : this.config.modes["summary"];
+      const valueElements: Array<[ColorElement, string]> = [
+        ["sessionsValue", "sessions"],
+        ["msgsValue", "msgs"],
+        ["costValue", "cost"],
+        ["tokensValue", "tokens"],
+        ["tokensInValue", "tokensIn"],
+        ["tokensOutValue", "tokensOut"],
+        ["cacheValue", "cache"],
+      ];
+      for (const [el, colKey] of valueElements) {
+        if ((columnConfig as Record<string, boolean>)[colKey]) {
+          const label = ELEMENT_LABELS[el] ?? el;
+          const overrideVal =
+            (overrides as Record<string, string | null>)[el] ?? null;
+          const swatch = this.getResolvedColorSwatch(el, mode);
+          items.push({ type: "element", id: el, label, overrideVal, swatch });
+        }
+      }
+    } else if (mode) {
+      const columnConfig = this.config.modes[mode];
+      const isPerModel = mode === "Per Model";
+      const isExpanded = mode === "expanded";
+
+      // ---- Headers section ----
+      items.push({
+        type: "section",
+        id: "__headers__",
+        label: "Headers",
+        overrideVal: null,
+        swatch: "",
+      });
+
+      // Name column headers
+      if (isExpanded) {
+        for (const el of ["providerHeader", "modelHeader"] as ColorElement[]) {
+          const label = ELEMENT_LABELS[el] ?? el;
+          const overrideVal =
+            (overrides as Record<string, string | null>)[el] ?? null;
+          const swatch = this.getResolvedColorSwatch(el, mode);
+          items.push({ type: "element", id: el, label, overrideVal, swatch });
+        }
+      } else if (isPerModel) {
+        const el = "modelHeader" as ColorElement;
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, mode);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      } else {
+        // compact — provider header
+        const el = "providerHeader" as ColorElement;
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, mode);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+
+      // Visible data column headers
+      const headerElements: Array<[ColorElement, string]> = [
+        ["sessionsHeader", "sessions"],
+        ["msgsHeader", "msgs"],
+        ["costHeader", "cost"],
+        ["tokensHeader", "tokens"],
+        ["tokensInHeader", "tokensIn"],
+        ["tokensOutHeader", "tokensOut"],
+        ["cacheHeader", "cache"],
+      ];
+      for (const [el, colKey] of headerElements) {
+        if ((columnConfig as Record<string, boolean>)[colKey]) {
+          const label = ELEMENT_LABELS[el] ?? el;
+          const overrideVal =
+            (overrides as Record<string, string | null>)[el] ?? null;
+          const swatch = this.getResolvedColorSwatch(el, mode);
+          items.push({ type: "element", id: el, label, overrideVal, swatch });
+        }
+      }
+
+      // headerLine and footerLine at bottom of Headers section
+      for (const el of ["headerLine", "footerLine"] as ColorElement[]) {
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, mode);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+
+      // ---- Values section ----
+      items.push({
+        type: "section",
+        id: "__values__",
+        label: "Values",
+        overrideVal: null,
+        swatch: "",
+      });
+
+      // Name column values
+      if (isExpanded) {
+        for (const el of ["providerValue", "modelValue"] as ColorElement[]) {
+          const label = ELEMENT_LABELS[el] ?? el;
+          const overrideVal =
+            (overrides as Record<string, string | null>)[el] ?? null;
+          const swatch = this.getResolvedColorSwatch(el, mode);
+          items.push({ type: "element", id: el, label, overrideVal, swatch });
+        }
+      } else if (isPerModel) {
+        const el = "modelValue" as ColorElement;
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, mode);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      } else {
+        // compact — provider value
+        const el = "providerValue" as ColorElement;
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, mode);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+
+      // Visible data column values
+      const valueElements: Array<[ColorElement, string]> = [
+        ["sessionsValue", "sessions"],
+        ["msgsValue", "msgs"],
+        ["costValue", "cost"],
+        ["tokensValue", "tokens"],
+        ["tokensInValue", "tokensIn"],
+        ["tokensOutValue", "tokensOut"],
+        ["cacheValue", "cache"],
+      ];
+      for (const [el, colKey] of valueElements) {
+        if ((columnConfig as Record<string, boolean>)[colKey]) {
+          const label = ELEMENT_LABELS[el] ?? el;
+          const overrideVal =
+            (overrides as Record<string, string | null>)[el] ?? null;
+          const swatch = this.getResolvedColorSwatch(el, mode);
+          items.push({ type: "element", id: el, label, overrideVal, swatch });
+        }
+      }
+    } else {
+      // Global — show all elements in three sections
+      // (global overrides apply to all modes, so show everything)
+
+      // ---- Headers section ----
+      items.push({
+        type: "section",
+        id: "__headers__",
+        label: "Headers",
+        overrideVal: null,
+        swatch: "",
+      });
+
+      for (const el of [
+        "providerHeader",
+        "modelHeader",
+        "sessionsHeader",
+        "msgsHeader",
+        "costHeader",
+        "tokensHeader",
+        "tokensInHeader",
+        "tokensOutHeader",
+        "cacheHeader",
+      ] as ColorElement[]) {
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, null);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+
+      for (const el of ["headerLine", "footerLine"] as ColorElement[]) {
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, null);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+
+      // ---- Values section ----
+      items.push({
+        type: "section",
+        id: "__values__",
+        label: "Values",
+        overrideVal: null,
+        swatch: "",
+      });
+
+      for (const el of [
+        "providerValue",
+        "modelValue",
+        "sessionsValue",
+        "msgsValue",
+        "costValue",
+        "tokensValue",
+        "tokensInValue",
+        "tokensOutValue",
+        "cacheValue",
+      ] as ColorElement[]) {
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, null);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+
+      // ---- Display section ----
+      items.push({
+        type: "section",
+        id: "__display__",
+        label: "Display",
+        overrideVal: null,
+        swatch: "",
+      });
+
+      for (const el of [
+        "title",
+        "scope",
+        "separator",
+        "totalLabel",
+      ] as ColorElement[]) {
+        const label = ELEMENT_LABELS[el] ?? el;
+        const overrideVal =
+          (overrides as Record<string, string | null>)[el] ?? null;
+        const swatch = this.getResolvedColorSwatch(el, null);
+        items.push({ type: "element", id: el, label, overrideVal, swatch });
+      }
+    }
+
+    return items;
   }
 
   /** Get the indices (in layoutItems) of data columns (not name columns). */
@@ -815,24 +1146,178 @@ export class SettingsMenu implements Component {
     return lines;
   }
 
+  /**
+   * Render the flat Customize Widget Colors list with sections.
+   * Follows the same pattern as renderCustomizeLayout.
+   */
+  private renderColorItemsList(width: number): string[] {
+    const lines: string[] = [];
+    const innerWidth = width - 4;
+    const ac = this.theme.fg.bind(this.theme);
+
+    for (let i = 0; i < this.colorItems.length; i++) {
+      const item = this.colorItems[i]!;
+
+      // Section header
+      if (item.type === "section") {
+        const barCount = Math.max(0, innerWidth - item.label.length - 4);
+        lines.push(
+          "  " + ac("dim", "── " + item.label + " " + "─".repeat(barCount)),
+        );
+        continue;
+      }
+
+      const isSelected = i === this.colorCursor;
+      const cursor = isSelected ? ac("accent", "▸ ") : "  ";
+      const swatch = item.swatch;
+
+      const isOverridden = item.overrideVal !== null && item.overrideVal !== "";
+      const prefix = isOverridden ? "*" : " ";
+      const labelText = isSelected
+        ? ac("accent", `${prefix}${item.label}`.padEnd(18))
+        : ac("text", `${prefix}${item.label}`.padEnd(18));
+
+      const valueText = isOverridden
+        ? ac(isSelected ? "accent" : "text", item.overrideVal!)
+        : ac("dim", "(inherit)");
+
+      lines.push(`  ${cursor} ${swatch} ${labelText} ${valueText}`);
+    }
+
+    lines.push("  " + ac("dim", "─".repeat(Math.max(0, innerWidth))));
+    lines.push("");
+    lines.push(
+      "  " + ac("dim", "Enter edit • d=reset • Tab=cycle preview • Esc back"),
+    );
+
+    return lines;
+  }
+
+  /**
+   * Handle input in the flat Customize Widget Colors list.
+   */
+  private handleColorItemsInput(input: string, mode: DisplayMode | null): void {
+    // Tab — cycle preview mode
+    if (input === "\t") {
+      const modes: DisplayMode[] = [
+        "summary",
+        "compact",
+        "Per Model",
+        "expanded",
+      ];
+      const current =
+        this.previewModeOverride ?? (this.getActiveTabMode() as DisplayMode);
+      const idx = modes.indexOf(current);
+      this.previewModeOverride = modes[(idx + 1) % modes.length] ?? "summary";
+      this.invalidatePreview();
+      this.tui.requestRender();
+      return;
+    }
+
+    if (input === "\x1b[A" || input === "\x1bOA") {
+      let newCursor = this.colorCursor - 1;
+      while (newCursor >= 0 && this.colorItems[newCursor]?.type === "section") {
+        newCursor--;
+      }
+      if (newCursor >= 0) {
+        this.colorCursor = newCursor;
+        this.tui.requestRender();
+      }
+      return;
+    }
+    if (input === "\x1b[B" || input === "\x1bOB") {
+      let newCursor = this.colorCursor + 1;
+      while (
+        newCursor < this.colorItems.length &&
+        this.colorItems[newCursor]?.type === "section"
+      ) {
+        newCursor++;
+      }
+      if (newCursor < this.colorItems.length) {
+        this.colorCursor = newCursor;
+        this.tui.requestRender();
+      }
+      return;
+    }
+    if (input === "\r" || input === "\n") {
+      const item = this.colorItems[this.colorCursor];
+      if (item && item.type === "element") {
+        this.openColorPicker(item.id as ColorElement, mode);
+      }
+      return;
+    }
+    if (input === "d") {
+      const item = this.colorItems[this.colorCursor];
+      if (item && item.type === "section") {
+        this.resetColorSection(item.id, mode);
+      } else if (item && item.type === "element") {
+        this.resetColorOverride(item.id as ColorElement, mode);
+      }
+      return;
+    }
+  }
+
+  private resetColorOverride(
+    element: ColorElement,
+    mode: DisplayMode | null,
+  ): void {
+    if (mode) {
+      this.config.perModeColorOverrides[mode][element] = null;
+    } else {
+      this.config.globalColorOverrides[element] = null;
+    }
+    saveConfig(this.config);
+    this.invalidatePreview();
+    this.colorItems = this.buildColorItems(mode);
+    this.tui.requestRender();
+  }
+
+  private resetColorSection(sectionId: string, mode: DisplayMode | null): void {
+    let inSection = false;
+    for (const item of this.colorItems) {
+      if (item.type === "section") {
+        inSection = item.id === sectionId;
+        continue;
+      }
+      if (inSection && item.type === "element") {
+        if (mode) {
+          (
+            this.config.perModeColorOverrides[mode] as Record<
+              string,
+              string | null
+            >
+          )[item.id] = null;
+        } else {
+          (this.config.globalColorOverrides as Record<string, string | null>)[
+            item.id
+          ] = null;
+        }
+      }
+    }
+    saveConfig(this.config);
+    this.invalidatePreview();
+    this.colorItems = this.buildColorItems(mode);
+    this.tui.requestRender();
+  }
+
   // ===========================================================================
   // Navigator helpers
   // ===========================================================================
 
   private navigateBack(): void {
     if (this.depth > 0) {
-      const wasDepth = this.depth;
       this.depth = (this.depth - 1) as NavDepth;
       this.selectedIndex = 0;
       this.reorderMode = false;
       this.layoutItems = [];
       this.layoutCursor = 0;
-      this.previewPreset = null;
+      this.colorItems = [];
+      this.colorCursor = 0;
+      this.tentativeConfig = null;
+      this.previewModeOverride = null;
+      this.tentativeElement = null;
       this.invalidatePreview();
-      // Restore parent submenu when returning from depth 2 → 1
-      if (this.depth === 1 && wasDepth === 2) {
-        this.activeSubMenu = "colors";
-      } else if (this.depth === 0) {
+      if (this.depth === 0) {
         this.activeSubMenu = null;
       }
       this.tui.requestRender();
@@ -849,103 +1334,12 @@ export class SettingsMenu implements Component {
         return [
           "Enabled",
           "Customize Layout",
-          "Theme Preset",
-          "Custom Theme Colors",
+          "Theme Override",
+          "Customize Widget Colors",
         ];
       }
     }
-    if (this.depth === 1 && this.activeSubMenu === "colors") {
-      return ["Headers", "Values"];
-    }
     return [];
-  }
-
-  // ===========================================================================
-  // Preset picker list (used by both Global and mode tab Theme Preset)
-  // ===========================================================================
-
-  /** Render the preset picker list submenu. */
-  private renderPresetPickerList(width: number): string[] {
-    const lines: string[] = [];
-    const innerWidth = width - 4;
-
-    lines.push(
-      "  " +
-        this.theme.fg(
-          "dim",
-          "┌─ Theme Preset " + "─".repeat(Math.max(0, innerWidth - 15)),
-        ),
-    );
-    lines.push("");
-
-    for (let i = 0; i < THEMED_PRESETS.length; i++) {
-      const preset = THEMED_PRESETS[i];
-      const label = PRESET_LABELS[preset] ?? preset;
-      const isSelected = i === this.selectedIndex;
-      const cursor = isSelected ? this.theme.fg("accent", "▸ ") : "  ";
-      const swatch = renderColorSwatch(colorPresets[preset].title);
-      const text = isSelected
-        ? this.theme.fg("accent", label)
-        : this.theme.fg("text", label);
-      lines.push("  " + cursor + swatch + " " + text);
-    }
-
-    lines.push("");
-    lines.push(
-      "  " +
-        this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))),
-    );
-    lines.push("");
-    lines.push(
-      "  " + this.theme.fg("dim", "↑↓ select  Enter confirm  Esc cancel"),
-    );
-
-    return lines;
-  }
-
-  /** Handle input in the preset picker list (both Global and per-mode). */
-  private handlePresetPickerInput(
-    input: string,
-    mode: DisplayMode | null,
-  ): void {
-    if (input === "\x1b[A" || input === "\x1bOA") {
-      if (this.selectedIndex > 0) {
-        this.selectedIndex--;
-        this.previewPreset = THEMED_PRESETS[this.selectedIndex] ?? null;
-        this.invalidatePreview();
-        this.tui.requestRender();
-      }
-      return;
-    }
-    if (input === "\x1b[B" || input === "\x1bOB") {
-      if (this.selectedIndex < THEMED_PRESETS.length - 1) {
-        this.selectedIndex++;
-        this.previewPreset = THEMED_PRESETS[this.selectedIndex] ?? null;
-        this.invalidatePreview();
-        this.tui.requestRender();
-      }
-      return;
-    }
-    if (input === "\r" || input === "\n") {
-      const preset = THEMED_PRESETS[this.selectedIndex];
-      if (preset) {
-        if (mode) {
-          // Per-mode override: selecting the same as global clears override
-          if (preset === this.config.themedPreset) {
-            this.config.perModeThemedPreset[mode] = null;
-          } else {
-            this.config.perModeThemedPreset[mode] = preset;
-          }
-        } else {
-          this.config.themedPreset = preset;
-        }
-        this.previewPreset = null;
-        saveConfig(this.config);
-        this.invalidatePreview();
-        this.navigateBack();
-      }
-      return;
-    }
   }
 
   // ===========================================================================
@@ -987,7 +1381,7 @@ export class SettingsMenu implements Component {
     );
     lines.push("");
     lines.push(
-      "  " + this.theme.fg("dim", "↑↓ select  Enter confirm  Esc cancel"),
+      "  " + this.theme.fg("dim", "↑↓ select • Enter confirm • Esc cancel"),
     );
 
     return lines;
@@ -1158,9 +1552,13 @@ export class SettingsMenu implements Component {
       // onSelect
       (color: string | null) => {
         this.applyColorChange(element, mode, color);
+        // Rebuild color items so swatches and override labels update immediately
+        this.colorItems = this.buildColorItems(mode);
         this.colorPicker = null;
         this.editingElement = null;
         this.editingMode = null;
+        this.tentativeConfig = null;
+        this.tentativeElement = null;
         this.tui.requestRender();
       },
       // onCancel
@@ -1168,9 +1566,33 @@ export class SettingsMenu implements Component {
         this.colorPicker = null;
         this.editingElement = null;
         this.editingMode = null;
+        this.tentativeConfig = null;
+        this.tentativeElement = null;
+        this.tui.requestRender();
+      },
+      // onHover — update tentative config for live preview
+      (hoveredColor: string) => {
+        this.tentativeElement = element;
+        // Clone config and apply hovered override
+        this.tentativeConfig = JSON.parse(JSON.stringify(this.config));
+        if (mode) {
+          this.tentativeConfig.perModeColorOverrides[mode][element] =
+            hoveredColor;
+        } else {
+          this.tentativeConfig.globalColorOverrides[element] = hoveredColor;
+        }
         this.tui.requestRender();
       },
     );
+
+    // Fire initial hover with current selection (null = show default colors)
+    this.tentativeElement = element;
+    this.tentativeConfig = JSON.parse(JSON.stringify(this.config));
+    if (mode) {
+      this.tentativeConfig.perModeColorOverrides[mode][element] = currentColor;
+    } else {
+      this.tentativeConfig.globalColorOverrides[element] = currentColor;
+    }
 
     this.tui.requestRender();
   }
@@ -1200,11 +1622,11 @@ export class SettingsMenu implements Component {
     mode: DisplayMode | null,
   ): string {
     try {
-      const ansi = resolveColor(
-        element,
-        this.config,
-        mode ? { mode } : undefined,
-      );
+      const ansi = resolveColor(element, this.config, {
+        mode: mode ?? undefined,
+        getFgAnsi: (role: string) => this.theme.getFgAnsi(role),
+      });
+      // Truecolor: \x1b[38;2;R;G;Bm → convert back to hex for swatch
       const trueColorMatch = ansi.match(/38;2;(\d+);(\d+);(\d+)/);
       if (trueColorMatch) {
         const r = parseInt(trueColorMatch[1]);
@@ -1213,6 +1635,19 @@ export class SettingsMenu implements Component {
         const hex = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
         return renderColorSwatch(hex);
       }
+      // ANSI 4-bit foreground (30-37, 90-97) → convert to background for swatch
+      const ansiFgMatch = ansi.match(/\x1b\[(\d+)m/);
+      if (ansiFgMatch) {
+        const fgCode = parseInt(ansiFgMatch[1]);
+        // Foreground 30-37 → background 40-47; foreground 90-97 → background 100-107
+        if (fgCode >= 30 && fgCode <= 37) {
+          return `\x1b[${fgCode + 10}m  \x1b[0m`;
+        }
+        if (fgCode >= 90 && fgCode <= 97) {
+          return `\x1b[${fgCode + 10}m  \x1b[0m`;
+        }
+      }
+      // 256-color or default — render as foreground-colored text
       return `${ansi}██\x1b[0m`;
     } catch {
       return "??";
@@ -1224,70 +1659,6 @@ export class SettingsMenu implements Component {
   // ===========================================================================
 
   /** Render a color element list (for Headers or Values submenu at depth 2). */
-  private renderColorElementList(
-    elements: ColorElement[],
-    mode: DisplayMode | null,
-    width: number,
-    sectionLabel: string,
-  ): string[] {
-    const lines: string[] = [];
-    const innerWidth = width - 4;
-    const maxVisible = Math.min(elements.length, 12);
-
-    // Section header
-    lines.push("");
-    lines.push(
-      "  " +
-        this.theme.fg(
-          "dim",
-          `┌─ ${sectionLabel} ` +
-            "─".repeat(Math.max(0, innerWidth - sectionLabel.length - 4)),
-        ),
-    );
-    lines.push("");
-
-    for (let i = 0; i < Math.min(maxVisible, elements.length); i++) {
-      const element = elements[i];
-      const label = ELEMENT_LABELS[element] ?? element;
-      const isSelected = i === this.selectedIndex;
-
-      // Get override value
-      const overrides = mode
-        ? this.config.perModeColorOverrides[mode]
-        : this.config.globalColorOverrides;
-      const overrideVal =
-        (overrides as Record<string, string | null>)[element] ?? null;
-
-      const cursor = isSelected ? this.theme.fg("accent", "▸") : " ";
-      const swatch = this.getResolvedColorSwatch(element, mode);
-
-      const isOverridden = overrideVal !== null && overrideVal !== "";
-      const prefix = isOverridden ? "*" : " ";
-      const labelText = isSelected
-        ? this.theme.fg("accent", `${prefix}${label}`.padEnd(18))
-        : this.theme.fg("text", `${prefix}${label}`.padEnd(18));
-
-      const valueText = isOverridden
-        ? this.theme.fg(isSelected ? "accent" : "text", overrideVal!)
-        : this.theme.fg("dim", "(inherit)");
-
-      lines.push(`  ${cursor} ${swatch} ${labelText} ${valueText}`);
-    }
-
-    lines.push("");
-    lines.push(
-      "  " +
-        this.theme.fg("dim", "└" + "─".repeat(Math.max(0, innerWidth - 1))),
-    );
-    lines.push("");
-
-    // Hint
-    const hint = "Enter edit  d=reset  Esc back";
-    lines.push("  " + this.theme.fg("dim", hint));
-
-    return lines;
-  }
-
   // ===========================================================================
   // Navigator rendering (mode tabs at depth 0 and colors submenu at depth 1)
   // ===========================================================================
@@ -1326,69 +1697,20 @@ export class SettingsMenu implements Component {
     const arrow1 = this.theme.fg("dim", " ▶");
     lines.push(cursor1 + label1 + arrow1);
 
-    // ---- Item 2: Theme Preset ----
-    const overridePreset = this.config.perModeThemedPreset[mode];
-    const effectivePreset = overridePreset ?? this.config.themedPreset;
-    const presetLabel = PRESET_LABELS[effectivePreset] ?? effectivePreset;
-    const statusTag = overridePreset ? " (Override)" : " (Global)";
-    const themeValue = presetLabel + statusTag;
-
+    // ---- Item 2: Customize Widget Colors ----
     const isSelected2 = this.selectedIndex === 2 && this.depth === 0;
     const cursor2 = isSelected2 ? this.theme.fg("accent", "▸ ") : "  ";
     const label2 = isSelected2
-      ? this.theme.fg("accent", "Theme Preset: ")
-      : this.theme.fg("text", "Theme Preset: ");
-    const value2 = isSelected2
-      ? this.theme.fg("accent", themeValue)
-      : this.theme.fg("text", themeValue);
-    lines.push(cursor2 + label2 + value2);
-
-    // ---- Item 3: Custom Theme Colors ----
-    const isSelected3 = this.selectedIndex === 3 && this.depth === 0;
-    const cursor3 = isSelected3 ? this.theme.fg("accent", "▸ ") : "  ";
-    const label3 = isSelected3
-      ? this.theme.fg("accent", "Custom Theme Colors")
-      : this.theme.fg("text", "Custom Theme Colors");
-    const arrow3 = this.theme.fg("dim", " ▶");
-    lines.push(cursor3 + label3 + arrow3);
+      ? this.theme.fg("accent", "Customize Widget Colors")
+      : this.theme.fg("text", "Customize Widget Colors");
+    const arrow2 = this.theme.fg("dim", " ▶");
+    const resetHint2 = isSelected2 ? this.theme.fg("dim", "  d=reset") : "";
+    lines.push(cursor2 + label2 + arrow2 + resetHint2);
 
     return lines;
   }
 
   /** Render the Colors submenu at depth 1 (Headers / Values). */
-  private renderColorsSubmenu(width: number): string[] {
-    const lines: string[] = [];
-    const innerWidth = width - 4;
-
-    // ---- Back ----
-    const isSelected0 = this.selectedIndex === 0;
-    const cursor0 = isSelected0 ? this.theme.fg("accent", "▸ ") : "  ";
-    const label0 = isSelected0
-      ? this.theme.fg("accent", "◀ Back")
-      : this.theme.fg("text", "◀ Back");
-    lines.push("  " + cursor0 + label0);
-
-    // ---- Headers ----
-    const isSelected1 = this.selectedIndex === 1;
-    const cursor1 = isSelected1 ? this.theme.fg("accent", "▸ ") : "  ";
-    const label1 = isSelected1
-      ? this.theme.fg("accent", "Headers")
-      : this.theme.fg("text", "Headers");
-    const arrow1 = this.theme.fg("dim", " ▶");
-    lines.push("  " + cursor1 + label1 + arrow1);
-
-    // ---- Values ----
-    const isSelected2 = this.selectedIndex === 2;
-    const cursor2 = isSelected2 ? this.theme.fg("accent", "▸ ") : "  ";
-    const label2 = isSelected2
-      ? this.theme.fg("accent", "Values")
-      : this.theme.fg("text", "Values");
-    const arrow2 = this.theme.fg("dim", " ▶");
-    lines.push("  " + cursor2 + label2 + arrow2);
-
-    return lines;
-  }
-
   // ===========================================================================
   // Preview rendering
   // ===========================================================================
@@ -1402,17 +1724,14 @@ export class SettingsMenu implements Component {
   private renderPreview(width: number): string[] {
     if (width <= 0) return [];
 
-    const previewMode = this.getActiveTabMode();
+    const previewMode = this.previewModeOverride ?? this.getActiveTabMode();
 
-    // If a preset is being hovered, preview with that preset's colors
-    const effectiveConfig =
-      this.previewPreset !== null
-        ? { ...this.config, themedPreset: this.previewPreset }
-        : this.config;
+    // If editing colors, preview with the tentative (hovered) config
+    const effectiveConfig = this.tentativeConfig ?? this.config;
 
-    // Skip cache when previewing a transient preset
+    // Skip cache when previewing transient state (hovered color)
     if (
-      this.previewPreset === null &&
+      this.tentativeConfig === null &&
       this.previewCacheWidth === width &&
       this.previewCacheMode === previewMode &&
       this.previewCache.length > 0
@@ -1428,8 +1747,10 @@ export class SettingsMenu implements Component {
         mockData,
         width,
         previewMode,
+        undefined,
+        this.tentativeElement ?? undefined,
       );
-      if (this.previewPreset === null) {
+      if (this.tentativeConfig === null) {
         this.previewCache = lines;
         this.previewCacheWidth = width;
         this.previewCacheMode = previewMode;
@@ -1470,27 +1791,17 @@ export class SettingsMenu implements Component {
     const v1 = sel1 ? ac("accent", scopeLabel) : ac("text", scopeLabel);
     lines.push(c1 + l1 + v1);
 
-    // ---- Item 2: Theme Preset ----
-    const presetLabel =
-      PRESET_LABELS[this.config.themedPreset] ?? this.config.themedPreset;
+    // ---- Item 2: Customize Widget Colors ----
     const sel2 = idx === 2;
     const c2 = sel2 ? ac("accent", "▸ ") : "  ";
     const l2 = sel2
-      ? ac("accent", "Theme Preset: ")
-      : ac("text", "Theme Preset: ");
-    const v2 = sel2 ? ac("accent", presetLabel) : ac("text", presetLabel);
-    lines.push(c2 + l2 + v2);
+      ? ac("accent", "Customize Widget Colors")
+      : ac("text", "Customize Widget Colors");
+    const a2 = ac("dim", " ▶");
+    const reset2 = sel2 ? ac("dim", "  d=reset") : "";
+    lines.push(c2 + l2 + a2 + reset2);
 
-    // ---- Item 3: Custom Theme Colors ----
-    const sel3 = idx === 3;
-    const c3 = sel3 ? ac("accent", "▸ ") : "  ";
-    const l3 = sel3
-      ? ac("accent", "Custom Theme Colors")
-      : ac("text", "Custom Theme Colors");
-    const a3 = ac("dim", " ▶");
-    lines.push(c3 + l3 + a3);
-
-    // ---- Item 4: Active Modes ----
+    // ---- Item 3: Active Modes ----
     const enabledList = (
       ["summary", "compact", "Per Model", "expanded"] as DisplayMode[]
     )
@@ -1500,13 +1811,13 @@ export class SettingsMenu implements Component {
     const activeModesLabel = enabledList
       ? `Active Modes: ${enabledList}`
       : "Active Modes";
-    const sel4 = idx === 4;
-    const c4 = sel4 ? ac("accent", "▸ ") : "  ";
-    const l4 = sel4
+    const sel3 = idx === 3;
+    const c3 = sel3 ? ac("accent", "▸ ") : "  ";
+    const l3 = sel3
       ? ac("accent", activeModesLabel)
       : ac("text", activeModesLabel);
-    const a4 = ac("dim", " ▶");
-    lines.push(c4 + l4 + a4);
+    const a3 = ac("dim", " ▶");
+    lines.push(c3 + l3 + a3);
 
     return lines;
   }
@@ -1523,42 +1834,6 @@ export class SettingsMenu implements Component {
   }
 
   private renderTabContent(width: number): string[] {
-    // Colors submenu at depth 1 works the same for both Global and mode tabs
-    if (this.depth === 1 && this.activeSubMenu === "colors") {
-      const lines: string[] = [];
-      lines.push(
-        "  " +
-          this.theme.fg(
-            "dim",
-            "┌─ Custom Theme Colors " + "─".repeat(Math.max(0, width - 25)),
-          ),
-      );
-      lines.push("");
-      lines.push(...this.renderColorsSubmenu(width));
-      lines.push("");
-      lines.push(
-        "  " + this.theme.fg("dim", "└" + "─".repeat(Math.max(0, width - 3))),
-      );
-      return lines;
-    }
-
-    // Color element lists at depth 2 work the same for both Global and mode tabs
-    if (
-      this.depth === 2 &&
-      (this.activeSubMenu === "colorsHeaders" ||
-        this.activeSubMenu === "colorsValues")
-    ) {
-      const elements =
-        this.activeSubMenu === "colorsHeaders"
-          ? HEADER_ELEMENTS
-          : VALUE_ELEMENTS;
-      const sectionLabel =
-        this.activeSubMenu === "colorsHeaders" ? "Headers" : "Values";
-      const mode =
-        this.activeTab === 0 ? null : (TAB_MODE[this.activeTab] ?? "compact");
-      return this.renderColorElementList(elements, mode, width, sectionLabel);
-    }
-
     if (this.activeTab >= 1 && this.activeTab <= 4) {
       const mode = TAB_MODE[this.activeTab];
       return this.renderModeTabContent(mode, width);
@@ -1681,12 +1956,10 @@ export class SettingsMenu implements Component {
 
   private renderHintBar(width: number): string[] {
     let hints: string;
-    if (this.depth === 2) {
-      hints = "↑↓ navigate  Enter edit  d=reset  Esc back";
-    } else if (this.depth === 1) {
-      hints = "↑↓ select  Enter open  Esc back";
+    if (this.depth === 1) {
+      hints = "↑↓ select • Enter open • Esc back";
     } else {
-      hints = "← → tabs  ↑↓ select  ← → cycle  Enter open  Esc/q close";
+      hints = "← → tabs • ↑↓ select • ← → cycle • Enter open • Esc/q close";
     }
     if (width < hints.length + 2) return [];
     const leftPad = Math.floor((width - hints.length) / 2);
@@ -1704,9 +1977,9 @@ export class SettingsMenu implements Component {
   private renderPreviewSection(width: number): string[] {
     const lines: string[] = [];
     lines.push("");
+    const previewMode = this.previewModeOverride ?? this.getActiveTabMode();
     const modeLabel =
-      DISPLAY_MODE_LABELS[this.getActiveTabMode() as DisplayMode] ??
-      this.getActiveTabMode();
+      DISPLAY_MODE_LABELS[previewMode as DisplayMode] ?? previewMode;
     const suffix = ` - ${modeLabel}`;
     const baseLen = 18 + suffix.length;
     const previewLabel = this.theme.fg(
@@ -1734,7 +2007,7 @@ export class SettingsMenu implements Component {
   render(width: number): string[] {
     const safeWidth = Math.max(width, 40);
 
-    // If color picker is active, render it instead of normal content
+    // If color picker is active, render it with inline preview
     if (this.colorPicker) {
       const elementName = this.editingElement
         ? (ELEMENT_LABELS[this.editingElement] ?? this.editingElement)
@@ -1743,8 +2016,41 @@ export class SettingsMenu implements Component {
         ? `${elementName} (${this.editingMode} mode)`
         : `${elementName} (global)`;
 
+      const lines: string[] = [];
+
+      // Top border
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      // Title
+      const title = " Customize Widget Colors ";
+      const titlePad = Math.floor((safeWidth - title.length) / 2);
+      lines.push(
+        this.theme.fg(
+          "border",
+          "─".repeat(titlePad) +
+            title +
+            "─".repeat(safeWidth - titlePad - title.length),
+        ),
+      );
+      lines.push("");
+
+      // Live preview section
+      lines.push(...this.renderPreviewSection(safeWidth));
+
+      // Editing context
+      lines.push(this.theme.fg("dim", `Editing: ${context}`));
+      lines.push("");
+
+      // Color picker
       const pickerLines = this.colorPicker.render(safeWidth);
-      return [this.theme.fg("dim", `Editing: ${context}`), "", ...pickerLines];
+      for (const line of pickerLines) {
+        lines.push(line);
+      }
+
+      // Bottom border
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      return lines;
     }
 
     // Close prompt — ask user if they want to switch to the tab's mode
@@ -1799,6 +2105,40 @@ export class SettingsMenu implements Component {
         : "↑↓ select • Enter toggle • r reorder • Esc back";
       const leftPad = Math.floor((safeWidth - hint.length) / 2);
       lines.push(this.theme.fg("dim", " ".repeat(leftPad) + hint));
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      return lines;
+    }
+
+    // Customize Widget Colors submenu — flat section-based rendering
+    if (this.depth === 1 && this.activeSubMenu === "colorsFlat") {
+      const lines: string[] = [];
+
+      // Top border
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      // Title
+      const title = " Customize Widget Colors ";
+      const titlePad = Math.floor((safeWidth - title.length) / 2);
+      lines.push(
+        this.theme.fg(
+          "border",
+          "─".repeat(titlePad) +
+            title +
+            "─".repeat(safeWidth - titlePad - title.length),
+        ),
+      );
+      lines.push("");
+
+      // Live preview
+      lines.push(...this.renderPreviewSection(safeWidth));
+
+      // Color items list
+      const colorLines = this.renderColorItemsList(safeWidth);
+      for (const line of colorLines) {
+        lines.push(line);
+      }
+
       lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
 
       return lines;
@@ -1867,48 +2207,9 @@ export class SettingsMenu implements Component {
 
       lines.push("");
       lines.push(this.theme.fg("dim", "─".repeat(safeWidth)));
-      const hint = "Enter / ← → toggle  Esc back";
+      const hint = "Enter toggle • Esc back";
       const leftPad = Math.floor((safeWidth - hint.length) / 2);
       lines.push(this.theme.fg("dim", " ".repeat(leftPad) + hint));
-      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
-
-      return lines;
-    }
-
-    // If preset picker is active (depth 1 for themeOverride or presetPicker), render it
-    if (
-      this.depth === 1 &&
-      (this.activeSubMenu === "themeOverride" ||
-        this.activeSubMenu === "presetPicker")
-    ) {
-      const lines: string[] = [];
-
-      // Top border
-      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
-
-      // Title
-      const title = " Theme Preset ";
-      const titlePad = Math.floor((safeWidth - title.length) / 2);
-      lines.push(
-        this.theme.fg(
-          "border",
-          "─".repeat(titlePad) +
-            title +
-            "─".repeat(safeWidth - titlePad - title.length),
-        ),
-      );
-      lines.push("");
-
-      // Live preview
-      lines.push(...this.renderPreviewSection(safeWidth));
-
-      // Preset picker list
-      const pickerLines = this.renderPresetPickerList(safeWidth);
-      for (const line of pickerLines) {
-        lines.push(line);
-      }
-
-      lines.push("");
       lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
 
       return lines;
@@ -2196,89 +2497,13 @@ export class SettingsMenu implements Component {
       this.handleActiveModesInput(input);
       return;
     }
-    if (this.depth === 1 && this.activeSubMenu === "presetPicker") {
-      this.handlePresetPickerInput(input, null);
-      return;
-    }
-    if (this.depth === 1 && this.activeSubMenu === "colors") {
-      // Colors submenu navigation (Back / Headers / Values)
-      if (input === "\x1b[A" || input === "\x1bOA") {
-        if (this.selectedIndex > 0) {
-          this.selectedIndex--;
-          this.tui.requestRender();
-        }
-        return;
-      }
-      if (input === "\x1b[B" || input === "\x1bOB") {
-        if (this.selectedIndex < 2) {
-          this.selectedIndex++;
-          this.tui.requestRender();
-        }
-        return;
-      }
-      if (input === "\r" || input === "\n") {
-        if (this.selectedIndex === 0) {
-          this.navigateBack();
-        } else if (this.selectedIndex === 1) {
-          this.depth = 2;
-          this.selectedIndex = 0;
-          this.activeSubMenu = "colorsHeaders";
-          this.tui.requestRender();
-        } else {
-          this.depth = 2;
-          this.selectedIndex = 0;
-          this.activeSubMenu = "colorsValues";
-          this.tui.requestRender();
-        }
-        return;
-      }
-      return;
-    }
-    if (
-      this.depth === 2 &&
-      (this.activeSubMenu === "colorsHeaders" ||
-        this.activeSubMenu === "colorsValues")
-    ) {
-      const elements =
-        this.activeSubMenu === "colorsHeaders"
-          ? HEADER_ELEMENTS
-          : VALUE_ELEMENTS;
-      if (input === "\x1b[A" || input === "\x1bOA") {
-        if (this.selectedIndex > 0) {
-          this.selectedIndex--;
-          this.tui.requestRender();
-        }
-        return;
-      }
-      if (input === "\x1b[B" || input === "\x1bOB") {
-        if (this.selectedIndex < elements.length - 1) {
-          this.selectedIndex++;
-          this.tui.requestRender();
-        }
-        return;
-      }
-      if (input === "\r" || input === "\n") {
-        const element = elements[this.selectedIndex];
-        if (element) {
-          this.openColorPicker(element, null);
-        }
-        return;
-      }
-      if (input === "d") {
-        const element = elements[this.selectedIndex];
-        if (element) {
-          this.config.globalColorOverrides[element] = null;
-          saveConfig(this.config);
-          this.invalidatePreview();
-          this.tui.requestRender();
-        }
-        return;
-      }
+    if (this.depth === 1 && this.activeSubMenu === "colorsFlat") {
+      this.handleColorItemsInput(input, null);
       return;
     }
 
-    // ---- Depth 0: navigate the 5 items ----
-    // Up/down navigate the 5 items
+    // ---- Depth 0: navigate the 4 items ----
+    // Up/down navigate the 4 items
     if (input === "\x1b[A" || input === "\x1bOA") {
       if (this.globalNavIndex > 0) {
         this.globalNavIndex--;
@@ -2287,7 +2512,7 @@ export class SettingsMenu implements Component {
       return;
     }
     if (input === "\x1b[B" || input === "\x1bOB") {
-      if (this.globalNavIndex < 4) {
+      if (this.globalNavIndex < 3) {
         this.globalNavIndex++;
         this.tui.requestRender();
       }
@@ -2304,6 +2529,19 @@ export class SettingsMenu implements Component {
       return;
     }
 
+    // d — reset selected navigator item
+    if (input === "d") {
+      if (this.globalNavIndex === 2) {
+        // Reset all global color overrides
+        this.config.globalColorOverrides =
+          getDefaultConfig().globalColorOverrides;
+        saveConfig(this.config);
+        this.invalidatePreview();
+        this.tui.requestRender();
+      }
+      return;
+    }
+
     // Enter on item
     if (input === "\r" || input === "\n") {
       if (this.globalNavIndex === 0) {
@@ -2316,18 +2554,20 @@ export class SettingsMenu implements Component {
         // Time Scope — cycle forward
         this.cycleGlobalItem(1);
       } else if (this.globalNavIndex === 2) {
-        // Theme Preset — open preset picker
+        // Customize Widget Colors — open flat section-based list
         this.depth = 1;
         this.selectedIndex = 0;
-        this.activeSubMenu = "presetPicker";
-        this.previewPreset = THEMED_PRESETS[0] ?? null;
-        this.invalidatePreview();
-        this.tui.requestRender();
-      } else if (this.globalNavIndex === 3) {
-        // Custom Theme Colors
-        this.depth = 1;
-        this.selectedIndex = 0;
-        this.activeSubMenu = "colors";
+        this.activeSubMenu = "colorsFlat";
+        this.previewModeOverride = null;
+        this.colorItems = this.buildColorItems(null);
+        this.colorCursor = 0;
+        // Start cursor on first non-section item
+        for (let i = 0; i < this.colorItems.length; i++) {
+          if (this.colorItems[i]!.type !== "section") {
+            this.colorCursor = i;
+            break;
+          }
+        }
         this.tui.requestRender();
       } else {
         // Active Modes
@@ -2367,7 +2607,7 @@ export class SettingsMenu implements Component {
 
     // ---- Depth 0: Main navigator ----
     if (this.depth === 0) {
-      const itemCount = 4; // Enabled, Customize Layout, Theme Preset, Colors
+      const itemCount = 3; // Enabled, Customize Layout, Customize Widget Colors
 
       if (input === "\x1b[A" || input === "\x1bOA") {
         if (this.selectedIndex > 0) {
@@ -2396,6 +2636,19 @@ export class SettingsMenu implements Component {
         return;
       }
 
+      // d — reset selected navigator item
+      if (input === "d") {
+        if (this.selectedIndex === 2) {
+          // Reset all per-mode color overrides
+          this.config.perModeColorOverrides[mode] =
+            getDefaultConfig().perModeColorOverrides[mode];
+          saveConfig(this.config);
+          this.invalidatePreview();
+          this.tui.requestRender();
+        }
+        return;
+      }
+
       if (input === "\r" || input === "\n") {
         if (this.selectedIndex === 0) {
           this.toggleActiveMode(mode);
@@ -2407,101 +2660,9 @@ export class SettingsMenu implements Component {
       return;
     }
 
-    // ---- Depth 1: Colors submenu (Headers / Values) or Theme Preset list ----
-    if (this.depth === 1 && this.activeSubMenu === "themeOverride") {
-      this.handlePresetPickerInput(input, mode);
-      return;
-    }
-
-    if (this.depth === 1 && this.activeSubMenu === "colors") {
-      const itemCount = 3; // Back, Headers, Values
-
-      if (input === "\x1b[A" || input === "\x1bOA") {
-        if (this.selectedIndex > 0) {
-          this.selectedIndex--;
-          this.tui.requestRender();
-        }
-        return;
-      }
-      if (input === "\x1b[B" || input === "\x1bOB") {
-        if (this.selectedIndex < itemCount - 1) {
-          this.selectedIndex++;
-          this.tui.requestRender();
-        }
-        return;
-      }
-
-      if (input === "\r" || input === "\n") {
-        if (this.selectedIndex === 0) {
-          // Back
-          this.navigateBack();
-        } else if (this.selectedIndex === 1) {
-          // Headers
-          this.depth = 2;
-          this.selectedIndex = 0;
-          this.activeSubMenu = "colorsHeaders";
-          this.tui.requestRender();
-        } else if (this.selectedIndex === 2) {
-          // Values
-          this.depth = 2;
-          this.selectedIndex = 0;
-          this.activeSubMenu = "colorsValues";
-          this.tui.requestRender();
-        }
-        return;
-      }
-      return;
-    }
-
-    // ---- Depth 2: Color element list ----
-    if (
-      this.depth === 2 &&
-      (this.activeSubMenu === "colorsHeaders" ||
-        this.activeSubMenu === "colorsValues")
-    ) {
-      const elements =
-        this.activeSubMenu === "colorsHeaders"
-          ? HEADER_ELEMENTS
-          : VALUE_ELEMENTS;
-      const maxVisible = Math.min(elements.length, 12);
-
-      if (input === "\x1b[A" || input === "\x1bOA") {
-        if (this.selectedIndex > 0) {
-          this.selectedIndex--;
-          this.tui.requestRender();
-        }
-        return;
-      }
-      if (input === "\x1b[B" || input === "\x1bOB") {
-        if (
-          this.selectedIndex < maxVisible - 1 &&
-          this.selectedIndex < elements.length - 1
-        ) {
-          this.selectedIndex++;
-          this.tui.requestRender();
-        }
-        return;
-      }
-
-      if (input === "\r" || input === "\n") {
-        const element = elements[this.selectedIndex];
-        if (element) {
-          this.openColorPicker(element, mode);
-        }
-        return;
-      }
-
-      // d / Delete — reset override
-      if (input === "d" || input === "\x7f" || input === "\b") {
-        const element = elements[this.selectedIndex];
-        if (element) {
-          this.config.perModeColorOverrides[mode][element] = null;
-          saveConfig(this.config);
-          this.invalidatePreview();
-          this.tui.requestRender();
-        }
-        return;
-      }
+    // ---- Depth 1: Colors submenu ----
+    if (this.depth === 1 && this.activeSubMenu === "colorsFlat") {
+      this.handleColorItemsInput(input, mode);
       return;
     }
   }
@@ -2531,20 +2692,20 @@ export class SettingsMenu implements Component {
         break;
       }
       case 2: {
-        // Theme Preset — custom list picker
+        // Customize Widget Colors — open flat section-based list
         this.depth = 1;
         this.selectedIndex = 0;
-        this.activeSubMenu = "themeOverride";
-        this.previewPreset = THEMED_PRESETS[0] ?? null;
-        this.invalidatePreview();
-        this.tui.requestRender();
-        break;
-      }
-      case 3: {
-        // Custom Theme Colors
-        this.depth = 1;
-        this.selectedIndex = 0;
-        this.activeSubMenu = "colors";
+        this.activeSubMenu = "colorsFlat";
+        this.previewModeOverride = null;
+        this.colorItems = this.buildColorItems(mode);
+        this.colorCursor = 0;
+        // Start cursor on first non-section item
+        for (let i = 0; i < this.colorItems.length; i++) {
+          if (this.colorItems[i]!.type !== "section") {
+            this.colorCursor = i;
+            break;
+          }
+        }
         this.tui.requestRender();
         break;
       }

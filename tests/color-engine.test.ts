@@ -71,70 +71,39 @@ function ansiToHex(ansi: string): string {
 // =============================================================================
 
 describe("colorPresets completeness", () => {
-  const presetNames = Object.keys(
-    colorPresets,
-  ) as (keyof typeof colorPresets)[];
-
-  it("has exactly 7 presets", () => {
-    assert.equal(presetNames.length, 7);
+  it("has exactly 1 preset (default)", () => {
+    const presetNames = Object.keys(colorPresets);
+    assert.equal(presetNames.length, 1);
+    assert.equal(presetNames[0], "default");
   });
 
-  it("covers default, tokyo-night, dracula, gruvbox, nord, catppuccin, monokai", () => {
-    assert.deepEqual(
-      new Set(presetNames),
-      new Set([
-        "default",
-        "tokyo-night",
-        "dracula",
-        "gruvbox",
-        "nord",
-        "catppuccin",
-        "monokai",
-      ]),
-    );
-  });
+  describe("preset 'default'", () => {
+    const preset = colorPresets.default;
 
-  for (const presetName of presetNames) {
-    describe(`preset '${presetName}'`, () => {
-      const preset = colorPresets[presetName];
-
-      it("covers all 22 colorElements", () => {
-        for (const el of colorElements) {
-          assert.ok(
-            el in preset,
-            `Missing element '${el}' in preset '${presetName}'`,
-          );
-        }
-      });
-
-      it("has exactly 22 elements (no extras)", () => {
-        assert.equal(Object.keys(preset).length, 22);
-      });
-
-      it("all values are valid hex colors", () => {
-        for (const [el, hex] of Object.entries(preset)) {
-          assert.ok(
-            /^#[0-9a-fA-F]{6}$/.test(hex),
-            `'${el}' has invalid hex: ${hex}`,
-          );
-        }
-      });
-
-      it("all values resolve to valid ANSI via hexToAnsi", () => {
-        for (const hex of Object.values(preset)) {
-          const ansi = hexToAnsi(hex);
-          assert.ok(ansi.length > 0, `hex ${hex} did not produce ANSI`);
-          expectAnsiEscape(ansi);
-        }
-      });
-
-      it("is not mutated between reads", () => {
-        const first = colorPresets[presetName].title;
-        // Access again — must be identical
-        assert.equal(colorPresets[presetName].title, first);
-      });
+    it("covers all 24 colorElements", () => {
+      for (const el of colorElements) {
+        assert.ok(el in preset, `Missing element '${el}' in preset 'default'`);
+      }
     });
-  }
+
+    it("has exactly 24 elements (no extras)", () => {
+      assert.equal(Object.keys(preset).length, 24);
+    });
+
+    it("all values are valid hex colors", () => {
+      for (const [el, hex] of Object.entries(preset)) {
+        assert.ok(/^#[0-9a-fA-F]{6}$/.test(hex), `'${el}' has invalid hex: ${hex}`);
+      }
+    });
+
+    it("all values resolve to valid ANSI via hexToAnsi", () => {
+      for (const hex of Object.values(preset)) {
+        const ansi = hexToAnsi(hex);
+        assert.ok(ansi.length > 0, `hex ${hex} did not produce ANSI`);
+        expectAnsiEscape(ansi);
+      }
+    });
+  });
 });
 
 // =============================================================================
@@ -142,8 +111,8 @@ describe("colorPresets completeness", () => {
 // =============================================================================
 
 describe("colorElements", () => {
-  it("has exactly 22 elements", () => {
-    assert.equal(colorElements.length, 22);
+  it("has exactly 24 elements", () => {
+    assert.equal(colorElements.length, 24);
   });
 
   it("contains all expected categories", () => {
@@ -331,41 +300,6 @@ describe("resolveColor — preset-only", () => {
       expectAnsiEscape(ansi);
     }
   });
-});
-
-// =============================================================================
-// resolveColor — themed preset switching
-// =============================================================================
-
-describe("resolveColor — themed preset switching", () => {
-  for (const presetName of [
-    "tokyo-night",
-    "dracula",
-    "gruvbox",
-    "nord",
-    "catppuccin",
-    "monokai",
-  ] as const) {
-    it(`'${presetName}' preset correctly resolves title color`, () => {
-      const config = makeConfig({
-        themedPreset: presetName,
-      } as Partial<UsageWidgetConfig>);
-      const ansi = resolveColor("title", config);
-      expectAnsiEscape(ansi);
-      assert.equal(ansiToHex(ansi), colorPresets[presetName].title);
-    });
-
-    it(`'${presetName}' preset all elements resolve`, () => {
-      const config = makeConfig({
-        themedPreset: presetName,
-      } as Partial<UsageWidgetConfig>);
-      for (const el of colorElements) {
-        const ansi = resolveColor(el, config);
-        ansiIsNotEmpty(ansi);
-        expectAnsiEscape(ansi);
-      }
-    });
-  }
 });
 
 // =============================================================================
@@ -558,26 +492,11 @@ describe("resolveColor — custom themeFgMap", () => {
 });
 
 // =============================================================================
-// resolveColor — unknown preset fallback
-// =============================================================================
-
-describe("resolveColor — unknown preset fallback", () => {
-  it("falls back to 'default' preset for unknown preset name", () => {
-    const config = makeConfig({ themedPreset: "nord" });
-    // Overwrite themedPreset to something invalid at the raw object level
-    const raw = { ...config, themedPreset: "nonexistent" as any };
-    const ansi = resolveColor("title", raw as UsageWidgetConfig);
-    // Should fall back to default preset colors
-    assert.equal(ansiToHex(ansi), colorPresets.default.title);
-  });
-});
-
-// =============================================================================
 // resolveColor — combined scenarios
 // =============================================================================
 
 describe("resolveColor — combined scenarios", () => {
-  it("per-mode > global > preset precedence chain", () => {
+  it("per-mode > global > default preset precedence chain", () => {
     const perModeOverrides = { ...makeConfig().perModeColorOverrides };
     perModeOverrides.compact = {
       ...perModeOverrides.compact,
@@ -585,7 +504,6 @@ describe("resolveColor — combined scenarios", () => {
     };
 
     const config = makeConfig({
-      themedPreset: "dracula",
       globalColorOverrides: { costHeader: "#222222" },
       perModeColorOverrides: perModeOverrides,
     });
@@ -598,24 +516,23 @@ describe("resolveColor — combined scenarios", () => {
     const ansiSummary = resolveColor("costHeader", config, { mode: "summary" });
     assert.equal(ansiToHex(ansiSummary), "#222222");
 
-    // Mode where both are null: preset wins
+    // Mode where both are null: falls through to default preset + theme role
     const perModeOverrides2 = { ...makeConfig().perModeColorOverrides };
     perModeOverrides2.compact = {
       ...perModeOverrides2.compact,
       costHeader: null,
     };
     const config2 = makeConfig({
-      themedPreset: "dracula",
       globalColorOverrides: { costHeader: null },
       perModeColorOverrides: perModeOverrides2,
     });
     const ansiPreset = resolveColor("costHeader", config2, { mode: "compact" });
-    assert.equal(ansiToHex(ansiPreset), colorPresets.dracula.costHeader);
+    assert.equal(ansiToHex(ansiPreset), colorPresets.default.costHeader);
   });
 });
 
 // =============================================================================
-// resolveColor — every element, every mode, every preset
+// resolveColor — every element, every mode
 // =============================================================================
 
 describe("resolveColor — exhaustive coverage", () => {
@@ -630,19 +547,12 @@ describe("resolveColor — exhaustive coverage", () => {
     }
   });
 
-  it("every element × preset combination returns valid ANSI", () => {
-    const presetNames = Object.keys(
-      colorPresets,
-    ) as (keyof typeof colorPresets)[];
-    for (const preset of presetNames) {
-      const config = makeConfig({
-        themedPreset: preset,
-      } as Partial<UsageWidgetConfig>);
-      for (const el of colorElements) {
-        const ansi = resolveColor(el, config);
-        ansiIsNotEmpty(ansi);
-        expectAnsiEscape(ansi);
-      }
+  it("default preset every element returns valid ANSI", () => {
+    const config = makeConfig();
+    for (const el of colorElements) {
+      const ansi = resolveColor(el, config);
+      ansiIsNotEmpty(ansi);
+      expectAnsiEscape(ansi);
     }
   });
 });

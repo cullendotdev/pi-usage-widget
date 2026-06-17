@@ -284,9 +284,9 @@ describe("SettingsMenu config lifecycle", () => {
     } = require("../config-persistence.js");
 
     const modified = mergeConfig(getDefaultConfig(), {
-      themedPreset: "dracula",
+      themedPreset: "default",
     } as any);
-    assert.equal(modified.themedPreset, "dracula");
+    assert.equal(modified.themedPreset, "default");
 
     saveConfig(modified);
 
@@ -294,7 +294,7 @@ describe("SettingsMenu config lifecycle", () => {
     const { loadConfig: load2 } = require("../config-persistence.js");
     const loaded = load2();
 
-    assert.equal(loaded.themedPreset, "dracula");
+    assert.equal(loaded.themedPreset, "default");
   });
 });
 
@@ -352,33 +352,14 @@ describe("Global tab setting values", () => {
     assert.equal(timeScopes.length, 7);
   });
 
-  it("themed presets have exactly 7 values", () => {
-    const presets = [
-      "default",
-      "tokyo-night",
-      "dracula",
-      "gruvbox",
-      "nord",
-      "catppuccin",
-      "monokai",
-    ];
-    assert.equal(presets.length, 7);
+  it("themed presets have exactly 1 value (default only)", () => {
+    const presets = ["default"];
+    assert.equal(presets.length, 1);
   });
 
-  it("all presets exist in color-engine", async () => {
+  it("default preset exists in color-engine", async () => {
     const { colorPresets } = await import("../color-engine.js");
-    const presetNames = [
-      "default",
-      "tokyo-night",
-      "dracula",
-      "gruvbox",
-      "nord",
-      "catppuccin",
-      "monokai",
-    ];
-    for (const name of presetNames) {
-      assert.ok(colorPresets[name] !== undefined, `Missing preset: ${name}`);
-    }
+    assert.ok(colorPresets["default"] !== undefined, "Missing default preset");
   });
 });
 
@@ -417,17 +398,9 @@ describe("Global tab — SettingsList items", () => {
     assert.equal(values.length, 7);
   });
 
-  it("themedPreset values include all presets", () => {
-    const values = [
-      "Default",
-      "Tokyo Night",
-      "Dracula",
-      "Gruvbox",
-      "Nord",
-      "Catppuccin",
-      "Monokai",
-    ];
-    assert.equal(values.length, 7);
+  it("themedPreset values include only default preset", () => {
+    const values = ["Default"];
+    assert.equal(values.length, 1);
   });
 });
 

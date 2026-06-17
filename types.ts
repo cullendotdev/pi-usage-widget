@@ -151,7 +151,7 @@ export interface ModeColumnConfig {
  *   - 16-color ANSI name: "black", "red", "green", "yellow", "blue",
  *     "magenta", "cyan", "white", "brightBlack", "brightRed", etc.
  *   - Custom hex code: "#rrggbb"
- * null means "inherit from parent level" (global → preset default).
+ * null means "inherit from parent level" (global → default scheme).
  */
 export interface ColorOverrides {
   title: string | null;
@@ -179,6 +179,9 @@ export interface ColorOverrides {
   // Separator lines
   headerLine: string | null;
   footerLine: string | null;
+  // Structural
+  separator: string | null;
+  totalLabel: string | null;
 }
 
 /**
@@ -205,16 +208,9 @@ export interface TableLineConfig {
 }
 
 /**
- * Named themed preset.
+ * Named color scheme.
  */
-export type ThemedPreset =
-  | "default"
-  | "tokyo-night"
-  | "dracula"
-  | "gruvbox"
-  | "nord"
-  | "catppuccin"
-  | "monokai";
+export type ThemedPreset = "default";
 
 /**
  * Top-level widget configuration.
@@ -225,9 +221,9 @@ export interface UsageWidgetConfig {
   defaultMode: DisplayMode;
   /** Global default time scope */
   defaultScope: TimeScope;
-  /** Active themed preset */
+  /** Active color scheme */
   themedPreset: ThemedPreset;
-  /** Per-mode theme preset override (null = inherit from global) */
+  /** Per-mode color scheme override (null = inherit from global) */
   perModeThemedPreset: Record<DisplayMode, ThemedPreset | null>;
   /** Global color overrides (applied to all modes) */
   globalColorOverrides: ColorOverrides;

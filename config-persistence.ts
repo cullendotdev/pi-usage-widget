@@ -92,6 +92,8 @@ function nullColorOverrides(): ColorOverrides {
     cacheValue: null,
     headerLine: null,
     footerLine: null,
+    separator: null,
+    totalLabel: null,
   };
 }
 

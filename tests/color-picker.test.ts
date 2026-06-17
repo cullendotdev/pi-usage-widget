@@ -356,9 +356,9 @@ describe("Color resolution with overrides", () => {
 // =============================================================================
 
 describe("Color elements for Global tab", () => {
-  it("colorElements from color-engine has 22 entries", async () => {
+  it("colorElements from color-engine has 24 entries", async () => {
     const { colorElements } = await import("../color-engine.js");
-    assert.equal(colorElements.length, 22);
+    assert.equal(colorElements.length, 24);
   });
 
   it("colorElements includes all required element names", async () => {

@@ -17,6 +17,7 @@ import { loadConfig, saveConfig } from "./config-persistence.js";
 import { SettingsMenu } from "./settings-menu.js";
 import { UsageComponent } from "./usage-modal.js";
 import { UsageWidget } from "./usage-widget.js";
+import { initTerminalPalette } from "./terminal-palette.js";
 import type { UsageData } from "./types.js";
 
 export default function (pi: ExtensionAPI) {
@@ -167,6 +168,10 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
+
+    // Query terminal palette in the background (best-effort)
+    initTerminalPalette().catch(() => {});
+
     cleanupSession();
 
     const config = loadConfig();

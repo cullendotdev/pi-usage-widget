@@ -20,7 +20,11 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { defaultThemeFgMap, hexToAnsi } from "./color-engine.js";
+import { defaultThemeFgMap, hexToAnsi, getThemeHex } from "./color-engine.js";
+import {
+  getCachedAnsiPalette,
+  FALLBACK_ANSI_PALETTE,
+} from "./terminal-palette.js";
 
 // =============================================================================
 // Constants
@@ -59,6 +63,8 @@ export const ELEMENT_LABELS: Record<string, string> = {
   cacheValue: "Cache Value",
   headerLine: "Header Line",
   footerLine: "Footer Line",
+  separator: "Separator",
+  totalLabel: "Total Label",
 };
 
 // =============================================================================
@@ -88,45 +94,129 @@ export interface ColorOptionLocation {
 
 /**
  * Build the list of theme fg role options with their hex swatch colors.
+ * When a live Theme is provided, hex values are extracted from the theme's
+ * actual color definitions; otherwise falls back to defaultThemeFgMap.
  * Order: accent, muted, dim, text, border, thinkingText, error, warning, success, info
  */
-export function buildThemeOptions(): ColorOption[] {
-  return [
-    { label: "accent", value: "accent", hex: defaultThemeFgMap.accent },
-    { label: "muted", value: "muted", hex: defaultThemeFgMap.muted },
-    { label: "dim", value: "dim", hex: defaultThemeFgMap.dim },
-    { label: "text", value: "text", hex: defaultThemeFgMap.text },
-    { label: "border", value: "border", hex: defaultThemeFgMap.border },
-    { label: "thinkingText", value: "thinkingText", hex: defaultThemeFgMap.thinkingText },
-    { label: "error", value: "error", hex: defaultThemeFgMap.error },
-    { label: "warning", value: "warning", hex: defaultThemeFgMap.warning },
-    { label: "success", value: "success", hex: defaultThemeFgMap.success },
-    { label: "info", value: "info", hex: defaultThemeFgMap.info },
-  ];
+export function buildThemeOptions(theme?: Theme): ColorOption[] {
+  const roles = [
+    "accent",
+    "muted",
+    "dim",
+    "text",
+    "border",
+    "thinkingText",
+    "error",
+    "warning",
+    "success",
+    "info",
+  ] as const;
+
+  return roles.map((role) => ({
+    label: role,
+    value: role,
+    hex: theme
+      ? getThemeHex(theme, role)
+      : (defaultThemeFgMap[role] ?? "#6a737d"),
+  }));
 }
 
 /**
- * Build the list of 16-color ANSI palette options with approximate hex swatch colors.
+ * Build the list of 16-color ANSI palette options.
+ * Uses the cached terminal palette (from OSC 4 query) when available;
+ * falls back to hardcoded approximations.
  * Standard 8 colors first, then bright 8 variants.
  */
 export function buildAnsiOptions(): ColorOption[] {
+  const palette = getCachedAnsiPalette();
   return [
-    { label: "black", value: "black", hex: "#1a1a2e" },
-    { label: "red", value: "red", hex: "#cc0000" },
-    { label: "green", value: "green", hex: "#4e9a06" },
-    { label: "yellow", value: "yellow", hex: "#c4a000" },
-    { label: "blue", value: "blue", hex: "#3465a4" },
-    { label: "magenta", value: "magenta", hex: "#75507b" },
-    { label: "cyan", value: "cyan", hex: "#06989a" },
-    { label: "white", value: "white", hex: "#d3d7cf" },
-    { label: "brightBlack", value: "brightBlack", hex: "#555753" },
-    { label: "brightRed", value: "brightRed", hex: "#ef2929" },
-    { label: "brightGreen", value: "brightGreen", hex: "#8ae234" },
-    { label: "brightYellow", value: "brightYellow", hex: "#fce94f" },
-    { label: "brightBlue", value: "brightBlue", hex: "#729fcf" },
-    { label: "brightMagenta", value: "brightMagenta", hex: "#ad7fa8" },
-    { label: "brightCyan", value: "brightCyan", hex: "#34e2e2" },
-    { label: "brightWhite", value: "brightWhite", hex: "#eeeeec" },
+    {
+      label: "black",
+      value: "black",
+      hex: palette.black ?? FALLBACK_ANSI_PALETTE.black ?? "#1a1a2e",
+    },
+    {
+      label: "red",
+      value: "red",
+      hex: palette.red ?? FALLBACK_ANSI_PALETTE.red ?? "#cc0000",
+    },
+    {
+      label: "green",
+      value: "green",
+      hex: palette.green ?? FALLBACK_ANSI_PALETTE.green ?? "#4e9a06",
+    },
+    {
+      label: "yellow",
+      value: "yellow",
+      hex: palette.yellow ?? FALLBACK_ANSI_PALETTE.yellow ?? "#c4a000",
+    },
+    {
+      label: "blue",
+      value: "blue",
+      hex: palette.blue ?? FALLBACK_ANSI_PALETTE.blue ?? "#3465a4",
+    },
+    {
+      label: "magenta",
+      value: "magenta",
+      hex: palette.magenta ?? FALLBACK_ANSI_PALETTE.magenta ?? "#75507b",
+    },
+    {
+      label: "cyan",
+      value: "cyan",
+      hex: palette.cyan ?? FALLBACK_ANSI_PALETTE.cyan ?? "#06989a",
+    },
+    {
+      label: "white",
+      value: "white",
+      hex: palette.white ?? FALLBACK_ANSI_PALETTE.white ?? "#d3d7cf",
+    },
+    {
+      label: "brightBlack",
+      value: "brightBlack",
+      hex:
+        palette.brightBlack ?? FALLBACK_ANSI_PALETTE.brightBlack ?? "#555753",
+    },
+    {
+      label: "brightRed",
+      value: "brightRed",
+      hex: palette.brightRed ?? FALLBACK_ANSI_PALETTE.brightRed ?? "#ef2929",
+    },
+    {
+      label: "brightGreen",
+      value: "brightGreen",
+      hex:
+        palette.brightGreen ?? FALLBACK_ANSI_PALETTE.brightGreen ?? "#8ae234",
+    },
+    {
+      label: "brightYellow",
+      value: "brightYellow",
+      hex:
+        palette.brightYellow ?? FALLBACK_ANSI_PALETTE.brightYellow ?? "#fce94f",
+    },
+    {
+      label: "brightBlue",
+      value: "brightBlue",
+      hex: palette.brightBlue ?? FALLBACK_ANSI_PALETTE.brightBlue ?? "#729fcf",
+    },
+    {
+      label: "brightMagenta",
+      value: "brightMagenta",
+      hex:
+        palette.brightMagenta ??
+        FALLBACK_ANSI_PALETTE.brightMagenta ??
+        "#ad7fa8",
+    },
+    {
+      label: "brightCyan",
+      value: "brightCyan",
+      hex: palette.brightCyan ?? FALLBACK_ANSI_PALETTE.brightCyan ?? "#34e2e2",
+    },
+    {
+      label: "brightWhite",
+      value: "brightWhite",
+      hex:
+        palette.brightWhite ?? FALLBACK_ANSI_PALETTE.brightWhite ?? "#eeeeec",
+    },
   ];
 }
 
@@ -137,10 +227,8 @@ export function validateHex(input: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(input);
 }
 
-/**
- * Render a 2-character color swatch block with ANSI background color.
- * Returns "??" for invalid hex.
- */
+/** Render a 2-character color swatch block with ANSI background color.
+ * Returns "??" for invalid hex. */
 export function renderColorSwatch(hex: string): string {
   if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return "??";
   const r = parseInt(hex.slice(1, 3), 16);
@@ -149,11 +237,40 @@ export function renderColorSwatch(hex: string): string {
   return `\x1b[48;2;${r};${g};${b}m  \x1b[0m`;
 }
 
+/** ANSI palette name → terminal background escape (uses terminal's actual colors). */
+const ANSI_BG: Record<string, string> = {
+  black: "\x1b[40m",
+  red: "\x1b[41m",
+  green: "\x1b[42m",
+  yellow: "\x1b[43m",
+  blue: "\x1b[44m",
+  magenta: "\x1b[45m",
+  cyan: "\x1b[46m",
+  white: "\x1b[47m",
+  brightBlack: "\x1b[100m",
+  brightRed: "\x1b[101m",
+  brightGreen: "\x1b[102m",
+  brightYellow: "\x1b[103m",
+  brightBlue: "\x1b[104m",
+  brightMagenta: "\x1b[105m",
+  brightCyan: "\x1b[106m",
+  brightWhite: "\x1b[107m",
+};
+
+/** Render a 2-character swatch using the terminal's native ANSI background color. */
+export function renderAnsiSwatch(name: string): string {
+  const bg = ANSI_BG[name];
+  if (bg) return `${bg}  \x1b[0m`;
+  return "??";
+}
+
 /**
  * Find a color value's location in the option sets.
  * Returns null if the color is unknown or null (inherit).
  */
-export function findColorOption(color: string | null): ColorOptionLocation | null {
+export function findColorOption(
+  color: string | null,
+): ColorOptionLocation | null {
   if (color === null || color === "") return null;
 
   // 1. Check theme roles
@@ -196,6 +313,7 @@ export class ColorPicker {
   private theme: Theme;
   private onSelect: (color: string | null) => void;
   private onCancel: () => void;
+  private onHover: ((color: string) => void) | null;
 
   /** Which color source mode is active */
   private activeMode: ColorPickerMode;
@@ -220,12 +338,14 @@ export class ColorPicker {
     currentColor: string | null,
     onSelect: (color: string | null) => void,
     onCancel: () => void,
+    onHover?: (color: string) => void,
   ) {
     this.theme = theme;
     this.onSelect = onSelect;
     this.onCancel = onCancel;
+    this.onHover = onHover ?? null;
 
-    this.themeOptions = buildThemeOptions();
+    this.themeOptions = buildThemeOptions(theme);
     this.ansiOptions = buildAnsiOptions();
 
     // Locate current color to pre-select the correct mode/option
@@ -258,7 +378,14 @@ export class ColorPicker {
     lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
     const title = " Color Picker ";
     const titlePad = Math.floor((safeWidth - title.length) / 2);
-    lines.push(this.theme.fg("border", "─".repeat(titlePad) + title + "─".repeat(safeWidth - titlePad - title.length)));
+    lines.push(
+      this.theme.fg(
+        "border",
+        "─".repeat(titlePad) +
+          title +
+          "─".repeat(safeWidth - titlePad - title.length),
+      ),
+    );
     lines.push("");
 
     // Mode selector bar
@@ -277,7 +404,7 @@ export class ColorPicker {
     // Footer
     lines.push("");
     lines.push(this.theme.fg("dim", "─".repeat(safeWidth)));
-    const hints = "Enter confirm  Esc cancel  ← → switch mode";
+    const hints = "Enter confirm • Esc cancel • ← → switch mode";
     if (safeWidth >= hints.length + 2) {
       const pad = Math.floor((safeWidth - hints.length) / 2);
       lines.push(this.theme.fg("dim", " ".repeat(pad) + hints));
@@ -328,7 +455,11 @@ export class ColorPicker {
       const opt = options[i];
       const isSelected = i === this.selectedIndex;
       const cursor = isSelected ? this.theme.fg("accent", "▸") : " ";
-      const swatch = renderColorSwatch(opt.hex);
+      // Use terminal-native ANSI background for palette mode, hex truecolor otherwise
+      const swatch =
+        this.activeMode === "ansi"
+          ? renderAnsiSwatch(opt.value)
+          : renderColorSwatch(opt.hex);
 
       // Build: cursor swatch label (hex)
       const labelPart = opt.label.padEnd(14);
@@ -336,7 +467,12 @@ export class ColorPicker {
         ? this.theme.fg("accent", opt.hex)
         : this.theme.fg("dim", opt.hex);
 
-      lines.push(`  ${cursor} ${swatch} ${labelPart} ${hexPart}`.slice(0, innerWidth + 2));
+      lines.push(
+        `  ${cursor} ${swatch} ${labelPart} ${hexPart}`.slice(
+          0,
+          innerWidth + 2,
+        ),
+      );
     }
 
     // Show scroll indicator if needed
@@ -364,7 +500,9 @@ export class ColorPicker {
         const swatch = renderColorSwatch(this.hexBuffer);
         lines.push("  Preview: " + swatch + " " + this.hexBuffer);
       } else if (this.hexBuffer.length > 1) {
-        lines.push("  " + this.theme.fg("error", "Invalid format — use #rrggbb"));
+        lines.push(
+          "  " + this.theme.fg("error", "Invalid format — use #rrggbb"),
+        );
       }
 
       if (this.hexError) {
@@ -396,19 +534,25 @@ export class ColorPicker {
     if (input === "\x1b[C" || input === "\x1bOC" || input === "\t") {
       // Right
       const idx = COLOR_PICKER_MODES.indexOf(this.activeMode);
-      this.activeMode = COLOR_PICKER_MODES[(idx + 1) % COLOR_PICKER_MODES.length];
+      this.activeMode =
+        COLOR_PICKER_MODES[(idx + 1) % COLOR_PICKER_MODES.length];
       this.selectedIndex = 0;
       this.scrollOffset = 0;
       this.editingHex = this.activeMode === "hex";
+      this.notifyHover();
       return;
     }
     if (input === "\x1b[D" || input === "\x1bOD") {
       // Left
       const idx = COLOR_PICKER_MODES.indexOf(this.activeMode);
-      this.activeMode = COLOR_PICKER_MODES[(idx - 1 + COLOR_PICKER_MODES.length) % COLOR_PICKER_MODES.length];
+      this.activeMode =
+        COLOR_PICKER_MODES[
+          (idx - 1 + COLOR_PICKER_MODES.length) % COLOR_PICKER_MODES.length
+        ];
       this.selectedIndex = 0;
       this.scrollOffset = 0;
       this.editingHex = this.activeMode === "hex";
+      this.notifyHover();
       return;
     }
 
@@ -435,6 +579,7 @@ export class ColorPicker {
       // Up
       if (this.selectedIndex > 0) {
         this.selectedIndex--;
+        this.notifyHover();
       }
       return;
     }
@@ -442,6 +587,7 @@ export class ColorPicker {
       // Down
       if (this.selectedIndex < options.length - 1) {
         this.selectedIndex++;
+        this.notifyHover();
       }
       return;
     }
@@ -458,7 +604,11 @@ export class ColorPicker {
     }
 
     // Any printable char in hex mode triggers editing
-    if (this.activeMode === "hex" && input.length === 1 && /[\x20-\x7e]/.test(input)) {
+    if (
+      this.activeMode === "hex" &&
+      input.length === 1 &&
+      /[\x20-\x7e]/.test(input)
+    ) {
       this.editingHex = true;
       this.hexBuffer = "#" + input;
       this.hexError = null;
@@ -472,6 +622,7 @@ export class ColorPicker {
       if (this.hexBuffer.length > 1) {
         this.hexBuffer = this.hexBuffer.slice(0, -1);
         this.hexError = null;
+        this.notifyHover();
       }
       return;
     }
@@ -490,8 +641,23 @@ export class ColorPicker {
         this.hexBuffer += input;
       }
       this.hexError = null;
+      this.notifyHover();
       return;
     }
+  }
+
+  /** Notify the hover callback with the currently selected/typed color. */
+  private notifyHover(): void {
+    if (!this.onHover) return;
+    let value: string | null = null;
+    if (this.activeMode === "theme") {
+      value = this.themeOptions[this.selectedIndex]?.value ?? null;
+    } else if (this.activeMode === "ansi") {
+      value = this.ansiOptions[this.selectedIndex]?.value ?? null;
+    } else if (validateHex(this.hexBuffer)) {
+      value = this.hexBuffer;
+    }
+    if (value) this.onHover(value);
   }
 
   /** Confirm the currently selected/entered color. */
