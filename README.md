@@ -1,244 +1,246 @@
-# /usage - Usage Statistics Dashboard
+<div align="center">
 
-A Pi extension that displays aggregated usage statistics across all sessions.
+# Pi Usage Widget
 
-![Default table view of /usage](screenshot.png)
+*Live usage statistics — cost, tokens, cache — as a widget above the editor, plus a `/usage` dashboard.*
 
-## Compatibility
+[Installation](#1-installation) • [Widget](#2-usage-widget) • [Dashboard](#3-usage-dashboard-usage) • [Settings](#4-settings-usage-settings) • [Configuration](#6-configuration--data)
 
-- **Pi version:** 0.42.4+
-- **Last updated:** 2026-04-19 (0.3.1)
+</div>
 
-## Installation
+A [Pi](https://pi.dev) extension that shows your usage statistics as a live widget above the editor.  The widget is fully themeable: toggle, reorder, and recolor any element. Includes a interactive `/usage` dashboard with insights.
+
+![Custom themed implementation of the Summary Widget](screenshots/custom-summary-widget.png)
+
+## Commands & shortcuts
+
+| Command / shortcut | Action |
+|---|---|
+| `/usage` | Opens the interactive usage dashboard |
+| `/usage-settings` | Opens the widget settings menu |
+| `Ctrl+Alt+U` or `/cycle-usage-mode` | Cycle the widget display mode (enabled modes only) |
+| `Alt+U` or `/cycle-usage-scope` | Cycle the widget time scope |
+
+---
+
+## 1. Installation
 
 ### Pi package manager
 
 ```bash
-pi install npm:@tmustier/pi-usage-extension
+pi install npm:pi-usage-widget
 ```
+
+### Manual (local development)
+
+Clone or copy the extension into your Pi extensions directory:
 
 ```bash
-pi install git:github.com/tmustier/pi-extensions
+git clone https://github.com/cullendotdev/pi-usage-widget.git
+cp -r pi-usage-widget ~/.pi/agent/extensions/pi-usage-widget
 ```
 
-Then filter to just this extension in `~/.pi/agent/settings.json`:
+---
 
-```json
-{
-  "packages": [
-    {
-      "source": "git:github.com/tmustier/pi-extensions",
-      "extensions": ["usage-extension/index.ts"]
-    }
-  ]
-}
-```
+## 2. Usage Widget
 
-### Local clone
+A live widget appears **above the editor** whenever Pi is running. It gives at-a-glance cost tracking without interrupting your workflow. Every visual element (titles, column headers, totals rows, separator lines) can be hidden, reordered, or recolored independently.
 
-Add to your `~/.pi/agent/settings.json`:
+### Display modes
 
-```json
-{
-  "extensions": [
-    "~/pi-extensions/usage-extension"
-  ]
-}
-```
+Press `Ctrl+Alt+U` to cycle through enabled display modes. Each mode answers a different question about your usage:
 
-## Usage
+1. **Summary** — single-line total cost for the active time scope.
 
-In Pi, run:
-```
-/usage
-```
+   ![Summary Widget](screenshots/summary-widget.png)
 
-## Features
+2. **Per Provider** — per-provider breakdown. *(Internal name: `compact`.)*
 
-### Views
+   ![Per Provider Widget](screenshots/per-provider-widget.png)
 
-`/usage` has two view modes, toggled with `v`:
+3. **Per Model** — full table with one row per model, no provider grouping. (provider name can be hidden)
 
-- **Table** (default) — per-provider / per-model stats with cost and token breakdown (screenshot at the top of this page).
-- **Insights** — narrative characteristics of your cost for the active time period, e.g. *"X% of your cost was at >150k context"*. Insights are **independent characteristics**, not a breakdown, so they overlap and can sum to more than 100%.
+   ![Per Model Widget](screenshots/per-model-widget.png)
 
-![Insights view of /usage](insights-screenshot.png)
+4. **Provider & Model** — full table with models nested under each provider. *(Internal name: `expanded`.)*
 
-**Unit:** insights are always weighted by recorded API cost (USD). Periods with no recorded cost show an explicit empty state rather than silently switching to a different unit.
+   ![Provider & Model Widget](screenshots/model-&-provider-widget.png)
 
-The insights currently shown:
+5. **Hidden** — the widget is suppressed. Press `Ctrl+Alt+U` to bring it back.
+
+### Time scopes
+
+Press `Alt+U` to cycle through scopes:
+
+| Period | Definition |
+|---|---|
+| **Last Hour** | Rolling 60-minute window from now |
+| **Today** | From 00:00 UTC today |
+| **Yesterday** | Previous UTC calendar day |
+| **This Week** | From Monday 00:00 UTC of the current week |
+| **Last Week** | Previous week (Monday 00:00 UTC → this Monday 00:00 UTC) |
+| **This Month** | From the 1st of the current month (UTC) |
+| **All Time** | All recorded sessions |
+
+> Periods are anchored to UTC. Session timestamps are recorded as absolute milliseconds, so the boundaries shift uniformly regardless of where the data was created.
+
+### Columns
+
+| Column | Description |
+|---|---|
+| **Provider / Model** | Provider name; expandable to show models in nested modes |
+| **Sessions** | Number of unique sessions |
+| **Msgs** | Number of assistant messages |
+| **Cost** | Total cost in USD (from the API response) |
+| **Tokens** | Fresh tokens for the turn: `input + output + cacheWrite` |
+| **↑In** | Fresh input tokens: `input + cacheWrite` *(dimmed)* |
+| **↓Out** | Output tokens *(dimmed)* |
+| **Cache** | `cacheRead + cacheWrite` *(dimmed; informational)* |
+
+> `Tokens` and `↑In` intentionally **exclude `cacheRead`**. Repeated cache hits don't swell the dashboard totals — those numbers reflect the fresh / billed prompt work.
+
+### Refresh behaviour
+
+The widget updates automatically:
+
+- **Debounced** — within ~1 second after each assistant message completes.
+- **Periodic** — every 30 seconds, so activity from subagents or other Pi sessions is captured too.
+
+---
+
+## 3. Usage Dashboard (`/usage`)
+
+`/usage` opens an interactive dashboard with a live widget plus a settings entry point. It is the easiest way to drill into the numbers behind the summary line.
+
+![Default table view of /usage](screenshots/usage-statistics.png)
+
+### View modes
+
+Press `v` to toggle between two views:
+
+- **Table** (default) — per-provider / per-model stats with cost and token breakdown.
+- **Insights** — narrative characteristics of your cost for the active period.
+
+![Insights view of /usage](screenshots/usage-insights.png)
+
+> Insights are **always weighted by recorded API cost (USD)**. Periods with no recorded cost show an explicit empty state rather than silently switching to a different unit.
+
+### Insight thresholds
 
 | Insight | Threshold |
 |---|---|
 | Parallel sessions | ≥ 4 sessions active within an exact ±2 min window |
 | Large context | `input + cacheRead + cacheWrite > 150k` |
 | Large uncached prompt | `input + cacheWrite > 100k` |
-| Long-running sessions | session lifetime ≥ 8 hours (global, not per-period slice) |
-| Top-session concentration | top 5 sessions by cost |
+| Long-running sessions | Session lifetime ≥ 8 hours *(global, not per-period slice)* |
+| Top-session concentration | Top 5 sessions by cost |
 
-### Time Periods (modal)
+> Insights are **independent characteristics**, not a breakdown — they can overlap and sum to more than 100%.
 
-| Period | Definition |
-|--------|------------|
-| **Today** | From midnight (00:00) today |
-| **This Week** | From Monday 00:00 of the current week |
-| **Last Week** | Previous week (Monday 00:00 → this Monday 00:00) |
-| **All Time** | All recorded sessions |
+---
 
-Use `Tab` or `←`/`→` to switch between periods.
+## 4. Settings (`/usage-settings`)
 
-### Usage Widget (Footer)
+Run `/usage-settings` to open the interactive settings menu. It has tabs for *Global* and each display mode, with a live preview pane that reflects changes instantly.
 
-A live usage widget appears **above the editor** whenever Pi is running. It provides at-a-glance cost tracking without interrupting your workflow.
+![Usage Widget Settings Menu](screenshots/widget-settings-menu.png)
 
-#### Modes
+### Default display mode & time scope
 
-Press `Ctrl+Alt+U` to cycle through five display modes:
+Set the defaults Pi uses when a session starts.
 
-1. **Summary** — single-line total cost for the current scope
+### Colour customisation
 
-   ```
-   Usage: $0.123 (Today)
-   ```
+Navigate to *Customize Widget Colors* to open a flat, section-based list organised into:
 
-2. **Compact** — per-provider breakdown
+- **Headers** — Title, Scope, and all column header colours.
+- **Values** — all column value colours.
+- **Display** — Header line, Footer line, Separator, and Total label.
 
-   ```
-   Usage (Today):
-     Deepseek: $0.123
-     Google: $1.200
-   ```
+Summary mode:
 
-3. **Detailed (Collapsed)** — full table with providers only
+![Customize Widget Colors](screenshots/customize-widget-colors.png)
 
-   ```
-   Usage (Today)              Sessions     Msgs     Cost   Tokens     ↑In    ↓Out   Cache
-   ──────────────────────────────────────────────────────────────────────────────────────
-   ▸ google                          5       25  $10.254   888.1k  800.1k     88k     19k
-   ▸ deepseek                        1        5  $0.0014     8.3k    7.3k     999     19k
-   ──────────────────────────────────────────────────────────────────────────────────────
-   ```
+Per Model mode:
 
-4. **Detailed (Expanded)** — full table with models nested under each provider
+![Customize Widget Colors](screenshots/customize-widget-colors-per-model.png)
 
-   ```
-   Usage (Today)              Sessions     Msgs     Cost   Tokens     ↑In    ↓Out   Cache
-   ──────────────────────────────────────────────────────────────────────────────────────
-   ▾ deepseek                       38      839    $1.16     2.2M      2M    157k     19k
-       deepseek-v4-pro              25      718    $1.11     1.9M    1.8M    145k     12k
-       deepseek-v4-flash            13      121    $0.06     298k    265k     12k      7k
-   ▾ google                          8       37    $0.32     449k    349k    100k     19k
-       gemini-3.1-pro-preview        3        7    $0.21      85k     75k     10k      4k
-       gemini-3.1-flash-li...        4       28    $0.10     347k    262k     85k     14k
-       gemini-flash-latest           1        1  $0.0089      31k     26k      5k      0k
-   ──────────────────────────────────────────────────────────────────────────────────────
-   ```
+Three colour sources are available:
 
-5. **Hidden** — widget is not shown
+- **Theme roles** — pick from your live Pi theme fg roles (accent, muted, dim, text, border, warning, etc.). Swatches show your actual theme colours in real time.
+- **ANSI palette** — pick from the terminal's 16-colour palette. Terminal-native background escapes render each swatch accurately. The palette is queried from your terminal via OSC 4 on startup, falling back to reasonable hex approximations.
+- **Custom hex** — enter any `#rrggbb` colour.
 
-#### Scopes
+While editing a colour, a **live preview** shows your widget with the change applied and the active element underlined. Press `Tab` to cycle through which display modes are previewed.
 
-Press `Ctrl+Shift+U` to cycle time scopes:
+Overrides are hierarchical: per-mode overrides → global overrides → live Pi theme. Setting an override to `null` lets it inherit from the next level up.
 
-- Last Hour
-- Today
-- Yesterday
-- This Week
-- Last Week
-- This Month
-- All Time
+### Layout customisation
 
-#### Formatting
+Per-mode layout is split into two sections:
 
-- **Cost**: always 3 decimal places (e.g. `$0.123`, `$1.200`). Zero shows as `-`.
-- **Tokens**: follows Pi conventions:
-  - 0–999: raw number
-  - 1k–9.9k: `X.Xk`
-  - 10k–999k: `Xk`
-  - 1M–9.9M: `X.XM`
-  - 10M+: `XM`
+- **Settings** — toggles for Totals Row, Headers, Header Line, and Footer Line.
+- **Columns** — toggle visibility for each data column. Press `r` on any column to enter reorder mode: use `↑` / `↓` to move it, `Enter` to confirm, `Esc` to cancel. The live preview updates as you reorder.
 
-#### Real-time Updates
+Column visibility and order are per-mode — Summary can have a different layout than Provider & Model.
 
-The widget updates automatically:
+![Customize Widget Layout](screenshots/customize-widget-layout.png)
 
-- Within ~1 second after each assistant message completes
-- Every 30 seconds to capture background subagent activity
+### Enable / disable modes
 
-#### Settings
+Toggle which display modes appear in the `Ctrl+Alt+U` cycle. The widget only cycles through enabled modes.
 
-Run `/usage-settings` to open the interactive settings menu. It lets you customize:
+---
 
-- **Display Mode** and **Time Scope** defaults
-- **Theme Preset** with live preview (7 themes: Default, Tokyo Night, Dracula, Gruvbox, Nord, Catppuccin, Monokai)
-- **Customize Layout** — per-mode column visibility and ordering, grouped into Settings (Totals Row, Headers, Header/Footer Lines) and Columns sections. Press `r` on a column to reorder with live preview.
-- **Custom Theme Colors** — override colors per visual element (headers, values, separators)
+## 5. Colour System
 
-Settings persist across sessions in `~/.pi/agent/pi-usage-widget-settings.json`.
+The widget's colour resolution works in layers:
 
-#### Defaults
+```
+Per-mode overrides  →  Global overrides  →  Live Pi theme (DEFAULT_THEME_ROLE_MAP)  →  Hardcoded fallback hex
+```
 
-On startup, the widget defaults to **Summary** mode and **Today** scope.
+Each widget element maps to a Pi theme fg role by default:
 
-### Timezone
+| Element | Theme role | Element | Theme role |
+|---|---|---|---|
+| Title | `accent` | Provider value | `text` |
+| Scope | `muted` | Model value | `text` |
+| Column headers | `muted` | Sessions / Token values | `text` |
+| Cost header | `warning` | Cost value | `warning` |
+| Cache / In / Out headers | `dim` | Cache / In / Out values | `dim` |
+| Separator lines | `border` | Separator · | `dim` |
+| Total label | `text` | | |
 
-Time periods are calculated in the local timezone where Pi runs. If you want to override it, set the `TZ` environment variable (IANA timezone, e.g. `TZ=UTC` or `TZ=America/New_York`) before launching Pi.
+The widget naturally adapts to any Pi theme — it does not need a separate theme selection.
 
-### Columns
+---
 
-| Column | Description |
-|--------|-------------|
-| **Provider / Model** | Provider name, expandable to show models |
-| **Sessions** | Number of unique sessions |
-| **Msgs** | Number of assistant messages |
-| **Cost** | Total cost in USD (from API response) |
-| **Tokens** | Fresh tokens for the turn: input + output + cache write |
-| **↑In** | Fresh input tokens: input + cache write *(dimmed)* |
-| **↓Out** | Output tokens *(dimmed)* |
-| **Cache** | Cache read + write tokens *(dimmed; informational)* |
+## 6. Configuration & Data
 
-> **As of 0.2.0:** `Tokens = Input + Output + CacheWrite` and `↑In = Input + CacheWrite`. `CacheRead` stays out of `Tokens` so repeated cache hits don't swamp the dashboard. The dashboard itself shows a one-line footer reminder.
+### Settings menu
 
-On narrow terminals, `/usage` automatically switches to a compact table instead of overflowing the terminal. Hidden columns reappear as soon as you widen the terminal.
+All configuration is done via the interactive settings menu. `/usage-settings`
 
-### Navigation
+### Settings file
 
-| Key | Action |
-|-----|--------|
-| `Tab` / `←` `→` | Switch time period |
-| `↑` `↓` | Select provider *(table view)* |
-| `Enter` / `Space` | Expand/collapse provider to show models *(table view)* |
-| `v` | Toggle between Table and Insights view |
-| `q` / `Esc` | Close |
+Settings persist in `~/.pi/agent/pi-usage-widget-settings.json`. Override the path with the `PI_USAGE_CONFIG_PATH` environment variable. The file uses deep merging: only keys you change are written, and defaults fill in the rest.
 
-## Provider Notes
+### Data source
 
-### Cost Tracking
+Statistics are parsed recursively from session files in `~/.pi/agent/sessions/`, including nested subagent runs such as `run-0/` directories. Each session is a JSONL file containing message entries with usage data. **All statistics are read and used locally; nothing is uploaded.**
 
-Cost data comes directly from the API response (`usage.cost.total`). Accuracy depends on the provider reporting costs.
+Assistant messages duplicated across branched session files are deduplicated by `timestamp + total tokens`, while recursive subagent sessions are still included.
 
-### Cache Tokens
+Respects the `PI_CODING_AGENT_DIR` environment variable when set.
 
-Cache token support varies by provider:
+### Provider notes
 
-| Provider | Cache Read | Cache Write |
-|----------|------------|-------------|
-| Anthropic | ✓ | ✓ |
-| Google | ✓ | ✗ |
-| OpenAI Codex | ✓ | ✗ |
+- **Cost tracking** — cost data comes directly from the API response (`usage.cost.total`). Accuracy depends on the provider reporting costs.
+- **Cache tokens** — cache token support varies by provider. The "Cache" column combines both read and write tokens. `Tokens` and `↑In` include cache writes but exclude cache reads so totals reflect fresh / billed prompt work.
 
-The "Cache" column combines both read and write tokens.
+---
 
-`Tokens` and `↑In` include cache writes but intentionally exclude cache reads. That keeps totals aligned with fresh/billed prompt work without letting repeated cache hits swamp the dashboard.
+## Credits
 
-## Data Source
-
-Statistics are parsed recursively from session files in `~/.pi/agent/sessions/`, including nested subagent runs such as `run-0/` directories. Each session is a JSONL file containing message entries with usage data.
-
-Assistant messages duplicated across branched session files are deduplicated by timestamp + total tokens, matching the extension's previous behavior while still including recursive subagent sessions.
-
-Respects the `PI_CODING_AGENT_DIR` environment variable if set.
-
-## Changelog
-
-See `CHANGELOG.md`.
+Credit to [@tmustier](https://github.com/tmustier) for their original work on [pi-usage-extension](https://github.com/tmustier/pi-extensions/tree/main/usage-extension), which served as the starting point for this extension.
