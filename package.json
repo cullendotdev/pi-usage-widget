@@ -1,11 +1,25 @@
 {
   "name": "pi-usage-widget",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Usage statistics footer widget for Pi sessions.",
   "license": "MIT",
   "author": "Cullen Botha (cullendotdev)",
   "keywords": [
-    "pi-package"
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "usage",
+    "statistics",
+    "widget",
+    "footer",
+    "session",
+    "token",
+    "context",
+    "cost",
+    "costs",
+    "monitoring",
+    "tui",
+    "terminal-ui"
   ],
   "repository": {
     "type": "git",
