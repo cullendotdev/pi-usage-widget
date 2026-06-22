@@ -25,6 +25,7 @@ import {
   getCachedAnsiPalette,
   FALLBACK_ANSI_PALETTE,
 } from "./terminal-palette.js";
+import { Key, matchesKey, decodeKittyPrintable } from "@earendil-works/pi-tui";
 
 // =============================================================================
 // Constants
@@ -525,13 +526,13 @@ export class ColorPicker {
 
   handleInput(input: string): void {
     // Escape — cancel
-    if (input === "\x1b") {
+    if (matchesKey(input, Key.escape)) {
       this.onCancel();
       return;
     }
 
     // Tab / Left-Right arrows — switch mode
-    if (input === "\x1b[C" || input === "\x1bOC" || input === "\t") {
+    if (matchesKey(input, Key.tab) || matchesKey(input, Key.right)) {
       // Right
       const idx = COLOR_PICKER_MODES.indexOf(this.activeMode);
       this.activeMode =
@@ -542,7 +543,7 @@ export class ColorPicker {
       this.notifyHover();
       return;
     }
-    if (input === "\x1b[D" || input === "\x1bOD") {
+    if (matchesKey(input, Key.left)) {
       // Left
       const idx = COLOR_PICKER_MODES.indexOf(this.activeMode);
       this.activeMode =
@@ -557,7 +558,7 @@ export class ColorPicker {
     }
 
     // Enter — confirm selection
-    if (input === "\r" || input === "\n") {
+    if (matchesKey(input, Key.enter)) {
       this.confirmSelection();
       return;
     }
@@ -575,7 +576,7 @@ export class ColorPicker {
     const options =
       this.activeMode === "theme" ? this.themeOptions : this.ansiOptions;
 
-    if (input === "\x1b[A" || input === "\x1bOA") {
+    if (matchesKey(input, Key.up)) {
       // Up
       if (this.selectedIndex > 0) {
         this.selectedIndex--;
@@ -583,7 +584,7 @@ export class ColorPicker {
       }
       return;
     }
-    if (input === "\x1b[B" || input === "\x1bOB") {
+    if (matchesKey(input, Key.down)) {
       // Down
       if (this.selectedIndex < options.length - 1) {
         this.selectedIndex++;
@@ -593,24 +594,25 @@ export class ColorPicker {
     }
 
     // Home / End keys for jumping
-    if (input === "\x1b[H" || input === "\x1bOH") {
+    if (matchesKey(input, Key.home)) {
       this.selectedIndex = 0;
       this.scrollOffset = 0;
       return;
     }
-    if (input === "\x1b[F" || input === "\x1bOF") {
+    if (matchesKey(input, Key.end)) {
       this.selectedIndex = options.length - 1;
       return;
     }
 
     // Any printable char in hex mode triggers editing
+    const printable = decodeKittyPrintable(input) ?? (input.length === 1 ? input : null);
     if (
       this.activeMode === "hex" &&
-      input.length === 1 &&
-      /[\x20-\x7e]/.test(input)
+      printable !== null &&
+      /[\x20-\x7e]/.test(printable)
     ) {
       this.editingHex = true;
-      this.hexBuffer = "#" + input;
+      this.hexBuffer = "#" + printable;
       this.hexError = null;
     }
   }
@@ -618,7 +620,7 @@ export class ColorPicker {
   /** Handle text input for the hex mode. */
   private handleHexInput(input: string): void {
     // Backspace
-    if (input === "\x7f" || input === "\b") {
+    if (matchesKey(input, Key.backspace)) {
       if (this.hexBuffer.length > 1) {
         this.hexBuffer = this.hexBuffer.slice(0, -1);
         this.hexError = null;
@@ -633,12 +635,14 @@ export class ColorPicker {
     }
 
     // Printable chars — append (hex chars only)
-    if (input.length === 1 && /^[0-9a-fA-F#]$/.test(input)) {
+    // Handle both legacy printable chars and Kitty CSI-u sequences.
+    const printable = decodeKittyPrintable(input) ?? (input.length === 1 ? input : null);
+    if (printable !== null && /^[0-9a-fA-F#]$/.test(printable)) {
       // If starting fresh, include the hash
-      if (this.hexBuffer === "" && input !== "#") {
-        this.hexBuffer = "#" + input;
+      if (this.hexBuffer === "" && printable !== "#") {
+        this.hexBuffer = "#" + printable;
       } else if (this.hexBuffer.length < 7) {
-        this.hexBuffer += input;
+        this.hexBuffer += printable;
       }
       this.hexError = null;
       this.notifyHover();

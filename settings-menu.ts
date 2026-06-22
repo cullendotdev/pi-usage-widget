@@ -13,7 +13,13 @@
  *   - HEADER_ELEMENTS, VALUE_ELEMENTS — color element groupings
  */
 
-import { Text, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import {
+  Text,
+  visibleWidth,
+  type Component,
+  Key,
+  matchesKey,
+} from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   loadConfig,
@@ -1302,7 +1308,7 @@ export class SettingsMenu implements Component {
    */
   private handleColorItemsInput(input: string, mode: DisplayMode | null): void {
     // Tab — cycle preview mode
-    if (input === "\t") {
+    if (matchesKey(input, Key.tab)) {
       const modes: DisplayMode[] = [
         "summary",
         "compact",
@@ -1318,7 +1324,7 @@ export class SettingsMenu implements Component {
       return;
     }
 
-    if (input === "\x1b[A" || input === "\x1bOA") {
+    if (matchesKey(input, Key.up)) {
       let newCursor = this.colorCursor - 1;
       while (
         newCursor >= 0 &&
@@ -1333,7 +1339,7 @@ export class SettingsMenu implements Component {
       }
       return;
     }
-    if (input === "\x1b[B" || input === "\x1bOB") {
+    if (matchesKey(input, Key.down)) {
       let newCursor = this.colorCursor + 1;
       while (
         newCursor < this.colorItems.length &&
@@ -1348,7 +1354,7 @@ export class SettingsMenu implements Component {
       }
       return;
     }
-    if (input === "\r" || input === "\n") {
+    if (matchesKey(input, Key.enter)) {
       const item = this.colorItems[this.colorCursor];
       if (item && item.type === "element" && !item.disabled) {
         this.openColorPicker(item.id as ColorElement, mode);
@@ -1515,7 +1521,7 @@ export class SettingsMenu implements Component {
   /** Handle input in the display mode picker. */
   private handleDisplayModePickerInput(input: string): void {
     const modes = [...DISPLAY_MODES, "hidden" as DisplayMode];
-    if (input === "\x1b[A" || input === "\x1bOA") {
+    if (matchesKey(input, Key.up)) {
       if (this.selectedIndex > 0) {
         this.selectedIndex--;
         this.previewModeOverride =
@@ -1525,7 +1531,7 @@ export class SettingsMenu implements Component {
       }
       return;
     }
-    if (input === "\x1b[B" || input === "\x1bOB") {
+    if (matchesKey(input, Key.down)) {
       if (this.selectedIndex < modes.length - 1) {
         this.selectedIndex++;
         this.previewModeOverride =
@@ -1535,7 +1541,7 @@ export class SettingsMenu implements Component {
       }
       return;
     }
-    if (input === "\r" || input === "\n") {
+    if (matchesKey(input, Key.enter)) {
       const dm = modes[this.selectedIndex];
       if (dm && dm !== this.config.defaultMode) {
         this.config.defaultMode = dm;
@@ -1614,14 +1620,14 @@ export class SettingsMenu implements Component {
       "expanded",
     ];
 
-    if (input === "\x1b[A" || input === "\x1bOA") {
+    if (matchesKey(input, Key.up)) {
       if (this.selectedIndex > 0) {
         this.selectedIndex--;
         this.tui.requestRender();
       }
       return;
     }
-    if (input === "\x1b[B" || input === "\x1bOB") {
+    if (matchesKey(input, Key.down)) {
       if (this.selectedIndex < modes.length - 1) {
         this.selectedIndex++;
         this.tui.requestRender();
@@ -1631,12 +1637,9 @@ export class SettingsMenu implements Component {
 
     // Toggle with Enter, Left, or Right
     if (
-      input === "\r" ||
-      input === "\n" ||
-      input === "\x1b[C" ||
-      input === "\x1bOC" ||
-      input === "\x1b[D" ||
-      input === "\x1bOD"
+      matchesKey(input, Key.enter) ||
+      matchesKey(input, Key.right) ||
+      matchesKey(input, Key.left)
     ) {
       const mode = modes[this.selectedIndex];
       if (mode) {
@@ -2414,7 +2417,7 @@ export class SettingsMenu implements Component {
     }
 
     // ── Reorder mode: Esc / q always cancels reorder, never navigates back ──
-    if (this.reorderMode && (input === "\x1b" || input === "q")) {
+    if (this.reorderMode && (matchesKey(input, Key.escape) || input === "q")) {
       this.handleLayoutInput(input);
       return;
     }
@@ -2436,14 +2439,14 @@ export class SettingsMenu implements Component {
           saveConfig(this.config);
         }
         this.done();
-      } else if (input === "n" || input === "N" || input === "\x1b") {
+      } else if (input === "n" || input === "N" || matchesKey(input, Key.escape)) {
         this.done();
       }
       return;
     }
 
     // Escape / q — close menu or navigate back
-    if (input === "\x1b" || input === "q") {
+    if (matchesKey(input, Key.escape) || input === "q") {
       if (this.depth > 0) {
         // If in reorder mode inside columns submenu, let handleLayoutInput cancel it
         if (this.reorderMode && this.activeSubMenu === "columns") {
@@ -2467,7 +2470,7 @@ export class SettingsMenu implements Component {
     }
 
     // Tab switching via left/right arrows
-    if (input === "\x1b[C" || input === "\x1bOC") {
+    if (matchesKey(input, Key.right)) {
       if (this.depth > 0) return; // Block tab switching in submenus
       this.activeTab = ((this.activeTab + 1) % TAB_NAMES.length) as TabIndex;
       this.globalNavIndex = 0;
@@ -2481,7 +2484,7 @@ export class SettingsMenu implements Component {
       this.tui.requestRender();
       return;
     }
-    if (input === "\x1b[D" || input === "\x1bOD") {
+    if (matchesKey(input, Key.left)) {
       if (this.depth > 0) return; // Block tab switching in submenus
       this.activeTab = ((this.activeTab - 1 + TAB_NAMES.length) %
         TAB_NAMES.length) as TabIndex;
@@ -2523,15 +2526,15 @@ export class SettingsMenu implements Component {
 
     // Reorder mode: handle arrow keys and confirm/cancel
     if (this.reorderMode) {
-      if (input === "\x1b[A" || input === "\x1bOA") {
+      if (matchesKey(input, Key.up)) {
         this.moveReorderColumn(-1, mode);
         return;
       }
-      if (input === "\x1b[B" || input === "\x1bOB") {
+      if (matchesKey(input, Key.down)) {
         this.moveReorderColumn(1, mode);
         return;
       }
-      if (input === "\r" || input === "\n") {
+      if (matchesKey(input, Key.enter)) {
         // Confirm reorder — persist to disk and exit reorder mode
         this.persistColumnOrder(mode);
         this.originalColumnOrder = [];
@@ -2539,7 +2542,7 @@ export class SettingsMenu implements Component {
         this.tui.requestRender();
         return;
       }
-      if (input === "\x1b") {
+      if (matchesKey(input, Key.escape)) {
         // Cancel reorder — restore original column order and reload
         this.config.modes[mode].columnOrder = [...this.originalColumnOrder];
         this.originalColumnOrder = [];
@@ -2553,7 +2556,7 @@ export class SettingsMenu implements Component {
     }
 
     // Normal mode input
-    if (input === "\x1b[A" || input === "\x1bOA") {
+    if (matchesKey(input, Key.up)) {
       // Move cursor up, skipping section headers
       let newCursor = this.layoutCursor - 1;
       while (
@@ -2569,7 +2572,7 @@ export class SettingsMenu implements Component {
       return;
     }
 
-    if (input === "\x1b[B" || input === "\x1bOB") {
+    if (matchesKey(input, Key.down)) {
       // Move cursor down, skipping section headers
       let newCursor = this.layoutCursor + 1;
       while (
@@ -2587,12 +2590,9 @@ export class SettingsMenu implements Component {
 
     // Left/Right or Enter to toggle
     if (
-      input === "\x1b[C" ||
-      input === "\x1bOC" ||
-      input === "\x1b[D" ||
-      input === "\x1bOD" ||
-      input === "\r" ||
-      input === "\n"
+      matchesKey(input, Key.right) ||
+      matchesKey(input, Key.left) ||
+      matchesKey(input, Key.enter)
     ) {
       const item = this.layoutItems[this.layoutCursor];
       if (item && item.type !== "section") {
@@ -2652,7 +2652,7 @@ export class SettingsMenu implements Component {
     }
 
     // Escape to go back
-    if (input === "\x1b") {
+    if (matchesKey(input, Key.escape)) {
       this.navigateBack();
       return;
     }
@@ -2677,14 +2677,14 @@ export class SettingsMenu implements Component {
 
     // ---- Depth 0: navigate the 4 items ----
     // Up/down navigate the 4 items
-    if (input === "\x1b[A" || input === "\x1bOA") {
+    if (matchesKey(input, Key.up)) {
       if (this.globalNavIndex > 0) {
         this.globalNavIndex--;
         this.tui.requestRender();
       }
       return;
     }
-    if (input === "\x1b[B" || input === "\x1bOB") {
+    if (matchesKey(input, Key.down)) {
       if (this.globalNavIndex < 3) {
         this.globalNavIndex++;
         this.tui.requestRender();
@@ -2693,11 +2693,11 @@ export class SettingsMenu implements Component {
     }
 
     // Left/right cycle values on Time Scope (item 1)
-    if (input === "\x1b[C" || input === "\x1bOC") {
+    if (matchesKey(input, Key.right)) {
       if (this.globalNavIndex === 1) this.cycleGlobalItem(1);
       return;
     }
-    if (input === "\x1b[D" || input === "\x1bOD") {
+    if (matchesKey(input, Key.left)) {
       if (this.globalNavIndex === 1) this.cycleGlobalItem(-1);
       return;
     }
@@ -2716,7 +2716,7 @@ export class SettingsMenu implements Component {
     }
 
     // Enter on item
-    if (input === "\r" || input === "\n") {
+    if (matchesKey(input, Key.enter)) {
       if (this.globalNavIndex === 0) {
         // Display Mode — open picker submenu
         this.depth = 1;
@@ -2784,14 +2784,14 @@ export class SettingsMenu implements Component {
     if (this.depth === 0) {
       const itemCount = 3; // Enabled, Customize Layout, Customize Widget Colors
 
-      if (input === "\x1b[A" || input === "\x1bOA") {
+      if (matchesKey(input, Key.up)) {
         if (this.selectedIndex > 0) {
           this.selectedIndex--;
           this.tui.requestRender();
         }
         return;
       }
-      if (input === "\x1b[B" || input === "\x1bOB") {
+      if (matchesKey(input, Key.down)) {
         if (this.selectedIndex < itemCount - 1) {
           this.selectedIndex++;
           this.tui.requestRender();
@@ -2802,10 +2802,7 @@ export class SettingsMenu implements Component {
       // Left/Right toggle Active Widget on index 0
       if (
         this.selectedIndex === 0 &&
-        (input === "\x1b[C" ||
-          input === "\x1bOC" ||
-          input === "\x1b[D" ||
-          input === "\x1bOD")
+        (matchesKey(input, Key.right) || matchesKey(input, Key.left))
       ) {
         this.toggleActiveMode(mode);
         return;
@@ -2839,7 +2836,7 @@ export class SettingsMenu implements Component {
         return;
       }
 
-      if (input === "\r" || input === "\n") {
+      if (matchesKey(input, Key.enter)) {
         if (this.selectedIndex === 0) {
           this.toggleActiveMode(mode);
         } else {
