@@ -10,7 +10,7 @@
 
 A [Pi](https://pi.dev) extension that shows your usage statistics as a live widget above the editor.  The widget is fully themeable: toggle, reorder, and recolor any element. Includes a interactive `/usage` dashboard with insights.
 
-![Custom themed implementation of the Summary Widget](screenshots/custom-summary-widget.png)
+![Custom themed implementation of the Summary Widget](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/custom-summary-widget.png)
 
 ## Commands & shortcuts
 
@@ -52,19 +52,19 @@ Press `Ctrl+Alt+U` to cycle through enabled display modes. Each mode answers a d
 
 1. **Summary** — single-line total cost for the active time scope.
 
-   ![Summary Widget](screenshots/summary-widget.png)
+   ![Summary Widget](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/summary-widget.png)
 
 2. **Per Provider** — per-provider breakdown. *(Internal name: `compact`.)*
 
-   ![Per Provider Widget](screenshots/per-provider-widget.png)
+   ![Per Provider Widget](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/per-provider-widget.png)
 
 3. **Per Model** — full table with one row per model, no provider grouping. (provider name can be hidden)
 
-   ![Per Model Widget](screenshots/per-model-widget.png)
+   ![Per Model Widget](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/per-model-widget.png)
 
 4. **Provider & Model** — full table with models nested under each provider. *(Internal name: `expanded`.)*
 
-   ![Provider & Model Widget](screenshots/model-&-provider-widget.png)
+   ![Provider & Model Widget](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/model-%26-provider-widget.png)
 
 5. **Hidden** — the widget is suppressed. Press `Ctrl+Alt+U` to bring it back.
 
@@ -112,7 +112,7 @@ The widget updates automatically:
 
 `/usage` opens an interactive dashboard with a live widget plus a settings entry point. It is the easiest way to drill into the numbers behind the summary line.
 
-![Default table view of /usage](screenshots/usage-statistics.png)
+![Default table view of /usage](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/usage-statistics.png)
 
 ### View modes
 
@@ -121,7 +121,7 @@ Press `v` to toggle between two views:
 - **Table** (default) — per-provider / per-model stats with cost and token breakdown.
 - **Insights** — narrative characteristics of your cost for the active period.
 
-![Insights view of /usage](screenshots/usage-insights.png)
+![Insights view of /usage](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/usage-insights.png)
 
 > Insights are **always weighted by recorded API cost (USD)**. Periods with no recorded cost show an explicit empty state rather than silently switching to a different unit.
 
@@ -143,7 +143,7 @@ Press `v` to toggle between two views:
 
 Run `/usage-settings` to open the interactive settings menu. It has tabs for *Global* and each display mode, with a live preview pane that reflects changes instantly.
 
-![Usage Widget Settings Menu](screenshots/widget-settings-menu.png)
+![Usage Widget Settings Menu](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/widget-settings-menu.png)
 
 ### Default display mode & time scope
 
@@ -159,11 +159,11 @@ Navigate to *Customize Widget Colors* to open a flat, section-based list organis
 
 Summary mode:
 
-![Customize Widget Colors](screenshots/customize-widget-colors.png)
+![Customize Widget Colors](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/customize-widget-colors.png)
 
 Per Model mode:
 
-![Customize Widget Colors](screenshots/customize-widget-colors-per-model.png)
+![Customize Widget Colors](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/customize-widget-colors-per-model.png)
 
 Three colour sources are available:
 
@@ -184,7 +184,7 @@ Per-mode layout is split into two sections:
 
 Column visibility and order are per-mode — Summary can have a different layout than Provider & Model.
 
-![Customize Widget Layout](screenshots/customize-widget-layout.png)
+![Customize Widget Layout](https://raw.githubusercontent.com/cullendotdev/pi-usage-widget/main/screenshots/customize-widget-layout.png)
 
 ### Enable / disable modes
 

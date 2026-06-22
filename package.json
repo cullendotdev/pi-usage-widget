@@ -1,6 +1,6 @@
 {
   "name": "pi-usage-widget",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Usage statistics footer widget for Pi sessions.",
   "license": "MIT",
   "author": "Cullen Botha (cullendotdev)",
