@@ -231,9 +231,7 @@ export interface UsageWidgetConfig {
   defaultScope: TimeScope;
   /** Active color scheme */
   themedPreset: ThemedPreset;
-  /** Per-mode color scheme override (null = inherit from global) */
-  perModeThemedPreset: Record<DisplayMode, ThemedPreset | null>;
-  /** Per-mode color overrides (null entries inherit from the global default) */
+  /** Per-mode color overrides (null entries inherit from the Pi theme) */
   perModeColorOverrides: Record<DisplayMode, ColorOverrides>;
   /** Widget placement */
   placement: PlacementConfig;

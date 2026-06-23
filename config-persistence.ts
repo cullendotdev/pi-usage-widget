@@ -192,6 +192,25 @@ function migrateLegacyGlobalColorOverrides(parsed: Record<string, unknown>): voi
 }
 
 /**
+ * Migrate the retired `perModeThemedPreset` field: drop it. The field was
+ * never wired up to any UI/engine code, so no value preservation is needed.
+ * No-op for configs that never had the field.
+ */
+function migrateLegacyPerModeThemedPreset(parsed: Record<string, unknown>): void {
+  delete parsed["perModeThemedPreset"];
+}
+
+/**
+ * Apply all field-level migrations for retired config keys to a parsed
+ * config object in place. New migrations should be added here as retired
+ * fields accumulate.
+ */
+function migrateLegacyConfig(parsed: Record<string, unknown>): void {
+  migrateLegacyGlobalColorOverrides(parsed);
+  migrateLegacyPerModeThemedPreset(parsed);
+}
+
+/**
  * Deep merge `partial` into `base`. Only keys present in `partial` override
  * base values. null/undefined values in `partial` mean "use default" and
  * are not merged. Nested objects are merged recursively.
@@ -273,7 +292,7 @@ export function loadConfig(): UsageWidgetConfig {
     if (!isObject(parsed)) {
       return defaults;
     }
-    migrateLegacyGlobalColorOverrides(parsed);
+    migrateLegacyConfig(parsed);
     return mergeConfig(defaults, parsed as Partial<UsageWidgetConfig>);
   } catch {
     return defaults;

@@ -6,7 +6,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { unlink, writeFile } from "node:fs/promises";
+import { unlink, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -413,8 +413,10 @@ describe("Color override config persistence", () => {
 
   beforeEach(async () => {
     originalEnv = process.env.PI_USAGE_CONFIG_PATH;
-    configPath = join(tmpdir(), `pi-usage-test-color-${Date.now()}.json`);
+    const testRoot = join(tmpdir(), `pi-usage-test-color-${Date.now()}`);
+    configPath = join(testRoot, "config", "pi-usage-widget-settings.json");
     process.env.PI_USAGE_CONFIG_PATH = configPath;
+    await mkdir(join(testRoot, "config"), { recursive: true });
     try { await unlink(configPath); } catch { /* */ }
     delete require.cache[require.resolve("../config-persistence.js")];
     delete require.cache[require.resolve("../color-engine.js")];
@@ -471,6 +473,73 @@ describe("Color override config persistence", () => {
     assert.equal(loaded.perModeColorOverrides.compact.title, null);
     // The retired field is gone.
     assert.equal((loaded as any).globalColorOverrides, undefined);
+  });
+
+  it("legacy perModeThemedPreset is dropped on load (never wired to UI/engine)", async () => {
+    const { writeFile } = require("node:fs/promises");
+    const { loadConfig } = require("../config-persistence.js");
+
+    // A pre-retirement config that carried the unused per-mode preset table.
+    const legacy = {
+      defaultMode: "summary",
+      perModeThemedPreset: {
+        summary: null,
+        compact: null,
+        "Per Model": null,
+        expanded: null,
+        hidden: null,
+      },
+    };
+    await writeFile(configPath, JSON.stringify(legacy));
+
+    delete require.cache[require.resolve("../config-persistence.js")];
+    const { loadConfig: load2 } = require("../config-persistence.js");
+    const loaded = load2();
+
+    // The retired field is gone.
+    assert.equal((loaded as any).perModeThemedPreset, undefined);
+    // Config otherwise loads with the expected defaults.
+    assert.equal(loaded.defaultMode, "summary");
+  });
+
+  it("migrateLegacyConfig strips all retired fields in a single pass", async () => {
+    const { writeFile } = require("node:fs/promises");
+    const { loadConfig } = require("../config-persistence.js");
+
+    // A config with BOTH retired fields present at once.
+    const legacy = {
+      defaultMode: "summary",
+      globalColorOverrides: { title: "#ff0000" },
+      perModeThemedPreset: {
+        summary: null,
+        compact: null,
+        "Per Model": null,
+        expanded: null,
+        hidden: null,
+      },
+      perModeColorOverrides: {
+        summary: { title: null, scope: null },
+        compact: { title: null, scope: null },
+        "Per Model": { title: null, scope: null },
+        expanded: { title: null, scope: null },
+        hidden: { title: null, scope: null },
+      },
+    };
+    await writeFile(configPath, JSON.stringify(legacy));
+
+    delete require.cache[require.resolve("../config-persistence.js")];
+    const { loadConfig: load2 } = require("../config-persistence.js");
+    const loaded = load2() as Record<string, unknown>;
+
+    // Both retired fields are stripped in one pass.
+    assert.equal(loaded["globalColorOverrides"], undefined);
+    assert.equal(loaded["perModeThemedPreset"], undefined);
+    // globalColorOverrides value was folded into the default mode's per-mode.
+    assert.equal(
+      (loaded["perModeColorOverrides"] as Record<string, Record<string, unknown>>)
+        .summary.title,
+      "#ff0000",
+    );
   });
 
   it("per-mode color overrides persist independently per mode", () => {
