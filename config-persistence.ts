@@ -4,15 +4,16 @@
  * Exports:
  *   - getDefaultConfig()  — hardcoded defaults
  *   - mergeConfig()       — deep merge partial config over default
- *   - loadConfig()        — load from disk → merge → return resolved config
+ *   - loadConfig()        — load from disk → migrate → return resolved config
  *   - saveConfig()        — write config to disk
  *
- * Config path: ~/.pi/agent/pi-usage-widget-settings.json
+ * Config path: ~/.pi/agent/config/pi-usage-widget-settings.json
+ * Legacy path (auto-migrated on first load): ~/.pi/agent/pi-usage-widget-settings.json
  * Test override: PI_USAGE_CONFIG_PATH env var
  */
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import type {
   UsageWidgetConfig,
@@ -31,7 +32,7 @@ function getConfigPath(): string {
   }
   const agentDir =
     process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
-  return join(agentDir, "pi-usage-widget-settings.json");
+  return join(agentDir, "config", "pi-usage-widget-settings.json");
 }
 
 // =============================================================================
@@ -211,6 +212,26 @@ function migrateLegacyConfig(parsed: Record<string, unknown>): void {
 }
 
 /**
+ * Migrate the config file from its legacy location to the new location.
+ * Idempotent: no-ops if the new file already exists, or if neither
+ * location has a file. Only runs once — the rename consumes the legacy
+ * file, so subsequent calls are no-ops.
+ */
+function migrateLegacyConfigPath(newPath: string): void {
+  const { existsSync, renameSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
+  if (existsSync(newPath)) return; // Already at the new location.
+
+  // Derive legacy path: same filename, one directory level up.
+  // Production: newPath = ~/.pi/agent/config/foo.json → oldPath = ~/.pi/agent/foo.json
+  const newDir = dirname(newPath);
+  const oldPath = join(dirname(newDir), basename(newPath));
+  if (!existsSync(oldPath)) return; // No legacy file to migrate.
+
+  mkdirSync(newDir, { recursive: true });
+  renameSync(oldPath, newPath);
+}
+
+/**
  * Deep merge `partial` into `base`. Only keys present in `partial` override
  * base values. null/undefined values in `partial` mean "use default" and
  * are not merged. Nested objects are merged recursively.
@@ -270,6 +291,10 @@ function deepMergeObjects(
  * Load config from disk, falling back to hardcoded defaults.
  * Partial user configs are safely merged with defaults.
  * Invalid JSON is handled gracefully — defaults are returned.
+ *
+ * On load, the config file is auto-migrated from its legacy location
+ * (one directory level up) if present, and field-level migrations are
+ * applied to strip retired keys.
  */
 export function loadConfig(): UsageWidgetConfig {
   const defaults = getDefaultConfig();
@@ -281,6 +306,8 @@ export function loadConfig(): UsageWidgetConfig {
     // Since this is an ES module and we don't want to use fs/promises for sync,
     // we use the sync fs API.
     const { readFileSync, existsSync } = require("node:fs");
+    // File-level migration: move legacy location → new location if needed.
+    migrateLegacyConfigPath(configPath);
     if (!existsSync(configPath)) {
       return defaults;
     }
@@ -292,6 +319,7 @@ export function loadConfig(): UsageWidgetConfig {
     if (!isObject(parsed)) {
       return defaults;
     }
+    // Field-level migrations: strip retired keys.
     migrateLegacyConfig(parsed);
     return mergeConfig(defaults, parsed as Partial<UsageWidgetConfig>);
   } catch {

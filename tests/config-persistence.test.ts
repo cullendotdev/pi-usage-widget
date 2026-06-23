@@ -1,15 +1,16 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { unlink, writeFile, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // We'll test config-persistence by mocking the config path.
-// The module reads from ~/.pi/agent/pi-usage-widget-settings.json.
+// The module reads from ~/.pi/agent/config/pi-usage-widget-settings.json.
 // For tests, we use a temp file and override the path via env.
 
 // NOTE: config-persistence.ts should respect PI_USAGE_CONFIG_PATH env var for testing,
-// falling back to ~/.pi/agent/pi-usage-widget-settings.json in production.
+// falling back to ~/.pi/agent/config/pi-usage-widget-settings.json in production.
 
 // For now, let's test the default config generation and merge logic directly,
 // which are the core behaviors we care about.
@@ -199,13 +200,14 @@ describe("mergeConfig", () => {
 let tempConfigPath: string;
 
 beforeEach(async () => {
-  // Create a unique temp path per test
+  // Create a unique temp path per test, mirroring the production
+  // ~/.pi/agent/config/<file>.json layout (legacy = ../<file>.json).
   const testDir = join(
     tmpdir(),
     `pi-usage-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
-  await mkdir(testDir, { recursive: true });
-  tempConfigPath = join(testDir, "pi-usage-widget-settings.json");
+  await mkdir(join(testDir, "config"), { recursive: true });
+  tempConfigPath = join(testDir, "config", "pi-usage-widget-settings.json");
   process.env.PI_USAGE_CONFIG_PATH = tempConfigPath;
 });
 
@@ -330,5 +332,86 @@ describe("saveConfig", () => {
     assert.equal(loaded.modes.compact.showTotals, false);
     assert.equal(loaded.modes["Per Model"].tokens, false);
     assert.equal(loaded.modes["Per Model"].cost, true);
+  });
+});
+
+// =============================================================================
+// migrateLegacyConfigPath — moves config from legacy location on first load
+// =============================================================================
+
+describe("migrateLegacyConfigPath", () => {
+  // Each test gets its own testDir so the legacy/new paths are isolated.
+  let testDir: string;
+  let newPath: string;
+  let legacyPath: string;
+
+  beforeEach(async () => {
+    testDir = join(
+      tmpdir(),
+      `pi-usage-migrate-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    newPath = join(testDir, "config", "pi-usage-widget-settings.json");
+    // Legacy path: one level up from new path, same filename.
+    legacyPath = join(testDir, "pi-usage-widget-settings.json");
+    await mkdir(join(testDir, "config"), { recursive: true });
+    process.env.PI_USAGE_CONFIG_PATH = newPath;
+  });
+
+  afterEach(async () => {
+    delete process.env.PI_USAGE_CONFIG_PATH;
+    try {
+      await unlink(newPath);
+    } catch {
+      /* ok */
+    }
+    try {
+      await unlink(legacyPath);
+    } catch {
+      /* ok */
+    }
+  });
+
+  it("moves legacy config file to new location on load", async () => {
+    const { loadConfig } = await import("../config-persistence.js?" + Math.random());
+    const { writeFile: writeFileAsync } = await import("node:fs/promises");
+
+    // Write a config at the legacy location (one level up).
+    await writeFileAsync(legacyPath, JSON.stringify({ defaultMode: "compact" }));
+    assert.equal(existsSync(legacyPath), true);
+    assert.equal(existsSync(newPath), false);
+
+    // loadConfig should trigger the migration.
+    const loaded = loadConfig();
+    assert.equal(loaded.defaultMode, "compact");
+
+    // After load: legacy is gone, new has the content.
+    assert.equal(existsSync(legacyPath), false);
+    assert.equal(existsSync(newPath), true);
+  });
+
+  it("is a no-op when the new location already has a file", async () => {
+    const { loadConfig } = await import("../config-persistence.js?" + Math.random());
+    const { writeFile: writeFileAsync } = await import("node:fs/promises");
+
+    // Both files exist. The new one has distinct content.
+    await writeFileAsync(newPath, JSON.stringify({ defaultMode: "expanded" }));
+    await writeFileAsync(legacyPath, JSON.stringify({ defaultMode: "compact" }));
+
+    const loaded = loadConfig();
+    // The new location wins — its content is preserved.
+    assert.equal(loaded.defaultMode, "expanded");
+    // Legacy is left alone (we don't delete it when new is already there).
+    assert.equal(existsSync(legacyPath), true);
+    assert.equal(existsSync(newPath), true);
+  });
+
+  it("is a no-op when neither location has a file", async () => {
+    const { loadConfig } = await import("../config-persistence.js?" + Math.random());
+
+    // Neither file exists — defaults should be returned without error.
+    const loaded = loadConfig();
+    assert.equal(loaded.defaultMode, "summary"); // Default value
+    assert.equal(existsSync(newPath), false);
+    assert.equal(existsSync(legacyPath), false);
   });
 });

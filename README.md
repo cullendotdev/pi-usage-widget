@@ -224,7 +224,7 @@ All configuration is done via the interactive settings menu. `/usage-settings`
 
 ### Settings file
 
-Settings persist in `~/.pi/agent/pi-usage-widget-settings.json`. Override the path with the `PI_USAGE_CONFIG_PATH` environment variable. The file uses deep merging: only keys you change are written, and defaults fill in the rest.
+Settings persist in `~/.pi/agent/config/pi-usage-widget-settings.json` (auto-migrated from the legacy `~/.pi/agent/pi-usage-widget-settings.json` location on first load). Override the path with the `PI_USAGE_CONFIG_PATH` environment variable. The file uses deep merging: only keys you change are written, and defaults fill in the rest.
 
 ### Data source
 

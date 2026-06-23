@@ -42,7 +42,7 @@ function mockTheme(): Record<string, (role: string, text: string) => string> {
 
 describe("Config persistence integration", () => {
   const testConfigDir = join(tmpdir(), "pi-usage-integration-test");
-  const testConfigPath = join(testConfigDir, "pi-usage-widget-settings.json");
+  const testConfigPath = join(testConfigDir, "config", "pi-usage-widget-settings.json");
 
   beforeEach(() => {
     process.env.PI_USAGE_CONFIG_PATH = testConfigPath;
@@ -50,7 +50,8 @@ describe("Config persistence integration", () => {
     try {
       rmSync(testConfigDir, { recursive: true });
     } catch {}
-    mkdirSync(testConfigDir, { recursive: true });
+    // Mirror the production ~/.pi/agent/config/<file>.json layout.
+    mkdirSync(join(testConfigDir, "config"), { recursive: true });
   });
 
   afterEach(() => {
@@ -128,7 +129,7 @@ describe("Config persistence integration", () => {
 
 describe("UsageWidget — cycle commands persist config", () => {
   const testConfigDir = join(tmpdir(), "pi-usage-integration-cycle");
-  const testConfigPath = join(testConfigDir, "pi-usage-widget-settings.json");
+  const testConfigPath = join(testConfigDir, "config", "pi-usage-widget-settings.json");
 
   // Re-define UsageWidget inline for testing (avoids Pi runtime dependency)
   // We test the logic pattern: cycleMode → updates config → calls saveConfig
@@ -140,7 +141,7 @@ describe("UsageWidget — cycle commands persist config", () => {
     try {
       rmSync(testConfigDir, { recursive: true });
     } catch {}
-    mkdirSync(testConfigDir, { recursive: true });
+    mkdirSync(join(testConfigDir, "config"), { recursive: true });
   });
 
   afterEach(() => {
@@ -396,14 +397,14 @@ describe("Render engine — config-driven display modes", () => {
 
 describe("Settings menu integration — config reload after close", () => {
   const testConfigDir = join(tmpdir(), "pi-usage-integration-reload");
-  const testConfigPath = join(testConfigDir, "pi-usage-widget-settings.json");
+  const testConfigPath = join(testConfigDir, "config", "pi-usage-widget-settings.json");
 
   beforeEach(() => {
     process.env.PI_USAGE_CONFIG_PATH = testConfigPath;
     try {
       rmSync(testConfigDir, { recursive: true });
     } catch {}
-    mkdirSync(testConfigDir, { recursive: true });
+    mkdirSync(join(testConfigDir, "config"), { recursive: true });
   });
 
   afterEach(() => {

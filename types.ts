@@ -222,7 +222,7 @@ export type ThemedPreset = "default";
 
 /**
  * Top-level widget configuration.
- * Stored in ~/.pi/agent/pi-usage-widget-settings.json
+ * Stored in ~/.pi/agent/config/pi-usage-widget-settings.json
  */
 export interface UsageWidgetConfig {
   /** Global default display mode */
