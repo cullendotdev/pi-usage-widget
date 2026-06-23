@@ -173,7 +173,7 @@ Three colour sources are available:
 
 While editing a colour, a **live preview** shows your widget with the change applied and the active element underlined. Press `Tab` to cycle through which display modes are previewed.
 
-Overrides are hierarchical: per-mode overrides → global overrides → live Pi theme. Setting an override to `null` lets it inherit from the next level up.
+Overrides are per-mode: each display mode has its own override map, and setting an override to `null` lets it inherit from the live Pi theme.
 
 ### Layout customisation
 
@@ -197,7 +197,7 @@ Toggle which display modes appear in the `Ctrl+Alt+U` cycle. The widget only cyc
 The widget's colour resolution works in layers:
 
 ```
-Per-mode overrides  →  Global overrides  →  Live Pi theme (DEFAULT_THEME_ROLE_MAP)  →  Hardcoded fallback hex
+Per-mode overrides  →  Live Pi theme (DEFAULT_THEME_ROLE_MAP)  →  Hardcoded fallback hex
 ```
 
 Each widget element maps to a Pi theme fg role by default:

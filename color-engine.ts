@@ -510,22 +510,16 @@ function pickOverride(
  * Resolve the final ANSI foreground color escape for an element given the
  * full config and optional resolution options.
  *
-
+ * Resolution order (highest priority first):
+ *   1. Per-mode override (non-null)
+ *   2. Default color scheme (live Pi theme roles)
+ *   3. Hardcoded fallback hex values
+ *   4. Last-resort "dim" from the theme fg map
  *
  * @param element  The colorable element to resolve
  * @param config   The full resolved UsageWidgetConfig
  * @param options  Optional mode and theme fg map overrides
  * @returns        ANSI foreground escape sequence (e.g. "\x1b[38;2;84;160;255m")
- */
-/**
- * Resolve the final ANSI foreground color escape for an element given the
- * full config and optional resolution options.
- *
- * Resolution order (highest priority first):
- *   1. Per-mode override (non-null)
- *   2. Global override (non-null)
- *   3. Default color scheme (live Pi theme roles)
- *   4. Hardcoded fallback hex values
  */
 export function resolveColor(
   element: ColorElement,
@@ -544,15 +538,7 @@ export function resolveColor(
     // Invalid override — fall through to next layer
   }
 
-  // 2. Global override
-  const globalOverride = pickOverride(config.globalColorOverrides, element);
-  if (globalOverride !== null) {
-    const result = overrideToAnsi(globalOverride, fgMap, getFgAnsi);
-    if (result) return result;
-    // Invalid override — fall through to next layer
-  }
-
-  // 3. Default color scheme — maps to live Pi theme roles
+  // 2. Default color scheme — maps to live Pi theme roles
   if (getFgAnsi) {
     const role = DEFAULT_THEME_ROLE_MAP[element];
     if (role) {
@@ -571,7 +557,7 @@ export function resolveColor(
     if (result) return result;
   }
 
-  // 5. Last-resort fallback — use "dim" from the fg map
+  // 3. Last-resort fallback — use "dim" from the fg map
   const fallbackHex = fgMap["dim"] ?? "#6a737d";
   return hexToAnsi(fallbackHex) || "\x1b[37m";
 }

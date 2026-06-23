@@ -125,11 +125,6 @@ export function getDefaultConfig(): UsageWidgetConfig {
     perModeColorOverrides[mode] = nullColorOverrides();
   }
 
-  const perModeThemedPreset = {} as Record<DisplayMode, null>;
-  for (const mode of ALL_MODES) {
-    perModeThemedPreset[mode] = null;
-  }
-
   const enabledModes = {} as Record<DisplayMode, boolean>;
   for (const mode of ALL_MODES) {
     enabledModes[mode] = true;
@@ -139,8 +134,6 @@ export function getDefaultConfig(): UsageWidgetConfig {
     defaultMode: "summary",
     defaultScope: "today",
     themedPreset: "default",
-    perModeThemedPreset: perModeThemedPreset as Record<DisplayMode, any>,
-    globalColorOverrides: nullColorOverrides(),
     perModeColorOverrides,
     placement: {
       mode: "footer",
@@ -168,6 +161,34 @@ export function getDefaultConfig(): UsageWidgetConfig {
 
 function isObject(item: unknown): item is Record<string, unknown> {
   return item !== null && typeof item === "object" && !Array.isArray(item);
+}
+
+/**
+ * Migrate the retired `globalColorOverrides` field: fold any non-null
+ * legacy global overrides into the default mode's per-mode overrides
+ * (without overwriting explicit per-mode values), then drop the field.
+ * No-op for configs that never used globals.
+ */
+function migrateLegacyGlobalColorOverrides(parsed: Record<string, unknown>): void {
+  const legacy = parsed["globalColorOverrides"];
+  if (!isObject(legacy)) {
+    delete parsed["globalColorOverrides"];
+    return;
+  }
+  const perMode = parsed["perModeColorOverrides"];
+  const defaultMode = (parsed["defaultMode"] as string | undefined) ?? "summary";
+  if (isObject(perMode)) {
+    const modeOverrides = (perMode as Record<string, unknown>)[defaultMode];
+    if (isObject(modeOverrides)) {
+      for (const [element, value] of Object.entries(legacy)) {
+        if (value === null || value === undefined) continue;
+        if ((modeOverrides as Record<string, unknown>)[element] == null) {
+          (modeOverrides as Record<string, unknown>)[element] = value;
+        }
+      }
+    }
+  }
+  delete parsed["globalColorOverrides"];
 }
 
 /**
@@ -252,6 +273,7 @@ export function loadConfig(): UsageWidgetConfig {
     if (!isObject(parsed)) {
       return defaults;
     }
+    migrateLegacyGlobalColorOverrides(parsed);
     return mergeConfig(defaults, parsed as Partial<UsageWidgetConfig>);
   } catch {
     return defaults;

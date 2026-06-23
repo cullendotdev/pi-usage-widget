@@ -728,79 +728,12 @@ export class SettingsMenu implements Component {
    * Other modes: "Headers" and "Values" sections.
    * Only shows elements for visible columns.
    */
-  private buildColorItems(mode: DisplayMode | null): ColorItem[] {
+  private buildColorItems(mode: DisplayMode): ColorItem[] {
     const items: ColorItem[] = [];
     const isSummary = mode === "summary";
-    const overrides = mode
-      ? this.config.perModeColorOverrides[mode]
-      : this.config.globalColorOverrides;
+    const overrides = this.config.perModeColorOverrides[mode];
 
-    if (mode === null) {
-      // Global tab — show all elements since global overrides apply to all modes.
-      // Split into two sections: Common + Headers, and Values.
-
-      // ---- Common + Headers ----
-      items.push({
-        type: "section",
-        id: "__common__",
-        label: "Common & Headers",
-        overrideVal: null,
-        swatch: "",
-      });
-
-      const common: ColorElement[] = [
-        "title",
-        "scope",
-        "separator",
-        "totalLabel",
-        "providerHeader",
-        "modelHeader",
-        "sessionsHeader",
-        "msgsHeader",
-        "costHeader",
-        "tokensHeader",
-        "tokensInHeader",
-        "tokensOutHeader",
-        "cacheHeader",
-        "headerLine",
-        "footerLine",
-      ];
-      for (const el of common) {
-        const label = ELEMENT_LABELS[el] ?? el;
-        const overrideVal =
-          (overrides as Record<string, string | null>)[el] ?? null;
-        const swatch = this.getResolvedColorSwatch(el, null);
-        items.push({ type: "element", id: el, label, overrideVal, swatch });
-      }
-
-      // ---- Values ----
-      items.push({
-        type: "section",
-        id: "__values__",
-        label: "Values",
-        overrideVal: null,
-        swatch: "",
-      });
-
-      const values: ColorElement[] = [
-        "providerValue",
-        "modelValue",
-        "sessionsValue",
-        "msgsValue",
-        "costValue",
-        "tokensValue",
-        "tokensInValue",
-        "tokensOutValue",
-        "cacheValue",
-      ];
-      for (const el of values) {
-        const label = ELEMENT_LABELS[el] ?? el;
-        const overrideVal =
-          (overrides as Record<string, string | null>)[el] ?? null;
-        const swatch = this.getResolvedColorSwatch(el, null);
-        items.push({ type: "element", id: el, label, overrideVal, swatch });
-      }
-    } else if (isSummary) {
+    if (isSummary) {
       // Single section: Elements
       items.push({
         type: "section",
@@ -820,9 +753,7 @@ export class SettingsMenu implements Component {
       }
 
       // Visible column values only
-      const columnConfig = mode
-        ? this.config.modes[mode]
-        : this.config.modes["summary"];
+      const columnConfig = this.config.modes[mode];
       const valueElements: Array<[ColorElement, string]> = [
         ["sessionsValue", "sessions"],
         ["msgsValue", "msgs"],
@@ -1030,7 +961,7 @@ export class SettingsMenu implements Component {
         const label = ELEMENT_LABELS[el] ?? el;
         const overrideVal =
           (overrides as Record<string, string | null>)[el] ?? null;
-        const swatch = this.getResolvedColorSwatch(el, null);
+        const swatch = this.getResolvedColorSwatch(el, mode);
         items.push({ type: "element", id: el, label, overrideVal, swatch });
       }
 
@@ -1038,7 +969,7 @@ export class SettingsMenu implements Component {
         const label = ELEMENT_LABELS[el] ?? el;
         const overrideVal =
           (overrides as Record<string, string | null>)[el] ?? null;
-        const swatch = this.getResolvedColorSwatch(el, null);
+        const swatch = this.getResolvedColorSwatch(el, mode);
         items.push({ type: "element", id: el, label, overrideVal, swatch });
       }
 
@@ -1065,7 +996,7 @@ export class SettingsMenu implements Component {
         const label = ELEMENT_LABELS[el] ?? el;
         const overrideVal =
           (overrides as Record<string, string | null>)[el] ?? null;
-        const swatch = this.getResolvedColorSwatch(el, null);
+        const swatch = this.getResolvedColorSwatch(el, mode);
         items.push({ type: "element", id: el, label, overrideVal, swatch });
       }
 
@@ -1087,7 +1018,7 @@ export class SettingsMenu implements Component {
         const label = ELEMENT_LABELS[el] ?? el;
         const overrideVal =
           (overrides as Record<string, string | null>)[el] ?? null;
-        const swatch = this.getResolvedColorSwatch(el, null);
+        const swatch = this.getResolvedColorSwatch(el, mode);
         items.push({ type: "element", id: el, label, overrideVal, swatch });
       }
     }
@@ -1306,8 +1237,11 @@ export class SettingsMenu implements Component {
   /**
    * Handle input in the flat Customize Widget Colors list.
    */
-  private handleColorItemsInput(input: string, mode: DisplayMode | null): void {
-    // Tab — cycle preview mode
+  private handleColorItemsInput(input: string, mode: DisplayMode): void {
+    // Effective mode for editing: preview override takes priority when set
+    const effectiveMode = this.previewModeOverride ?? mode;
+
+    // Tab — cycle preview mode AND rebuild color items for the new mode
     if (matchesKey(input, Key.tab)) {
       const modes: DisplayMode[] = [
         "summary",
@@ -1318,7 +1252,11 @@ export class SettingsMenu implements Component {
       const current =
         this.previewModeOverride ?? (this.getActiveTabMode() as DisplayMode);
       const idx = modes.indexOf(current);
-      this.previewModeOverride = modes[(idx + 1) % modes.length] ?? "summary";
+      const newMode = modes[(idx + 1) % modes.length] ?? "summary";
+      this.previewModeOverride = newMode;
+      // Rebuild color items for the newly selected preview mode
+      this.colorItems = this.buildColorItems(newMode);
+      this.colorCursor = SettingsMenu.firstSelectableIndex(this.colorItems);
       this.invalidatePreview();
       this.tui.requestRender();
       return;
@@ -1357,7 +1295,7 @@ export class SettingsMenu implements Component {
     if (matchesKey(input, Key.enter)) {
       const item = this.colorItems[this.colorCursor];
       if (item && item.type === "element" && !item.disabled) {
-        this.openColorPicker(item.id as ColorElement, mode);
+        this.openColorPicker(item.id as ColorElement, effectiveMode);
       }
       return;
     }
@@ -1376,13 +1314,7 @@ export class SettingsMenu implements Component {
           (this.colorItems[this.colorCursor]?.type === "section" ||
             this.colorItems[this.colorCursor]?.disabled)
         ) {
-          for (let i = 0; i < this.colorItems.length; i++) {
-            const ci = this.colorItems[i]!;
-            if (ci.type !== "section" && !ci.disabled) {
-              this.colorCursor = i;
-              break;
-            }
-          }
+          this.colorCursor = SettingsMenu.firstSelectableIndex(this.colorItems);
         }
         this.tui.requestRender();
       }
@@ -1392,9 +1324,9 @@ export class SettingsMenu implements Component {
       const item = this.colorItems[this.colorCursor];
       if (item?.disabled) return;
       if (item && item.type === "section") {
-        this.resetColorSection(item.id, mode);
+        this.resetColorSection(item.id, effectiveMode);
       } else if (item && item.type === "element") {
-        this.resetColorOverride(item.id as ColorElement, mode);
+        this.resetColorOverride(item.id as ColorElement, effectiveMode);
       }
       return;
     }
@@ -1402,20 +1334,16 @@ export class SettingsMenu implements Component {
 
   private resetColorOverride(
     element: ColorElement,
-    mode: DisplayMode | null,
+    mode: DisplayMode,
   ): void {
-    if (mode) {
-      this.config.perModeColorOverrides[mode][element] = null;
-    } else {
-      this.config.globalColorOverrides[element] = null;
-    }
+    this.config.perModeColorOverrides[mode][element] = null;
     saveConfig(this.config);
     this.invalidatePreview();
     this.colorItems = this.buildColorItems(mode);
     this.tui.requestRender();
   }
 
-  private resetColorSection(sectionId: string, mode: DisplayMode | null): void {
+  private resetColorSection(sectionId: string, mode: DisplayMode): void {
     let inSection = false;
     for (const item of this.colorItems) {
       if (item.type === "section") {
@@ -1423,18 +1351,10 @@ export class SettingsMenu implements Component {
         continue;
       }
       if (inSection && item.type === "element") {
-        if (mode) {
-          (
-            this.config.perModeColorOverrides[mode] as Record<
-              string,
-              string | null
-            >
-          )[item.id] = null;
-        } else {
-          (this.config.globalColorOverrides as Record<string, string | null>)[
-            item.id
-          ] = null;
-        }
+        (this.config.perModeColorOverrides[mode] as Record<
+          string,
+          string | null
+        >)[item.id] = null;
       }
     }
     saveConfig(this.config);
@@ -1448,23 +1368,113 @@ export class SettingsMenu implements Component {
   // ===========================================================================
 
   private navigateBack(): void {
-    if (this.depth > 0) {
-      this.depth = (this.depth - 1) as NavDepth;
-      this.selectedIndex = 0;
-      this.reorderMode = false;
-      this.layoutItems = [];
-      this.layoutCursor = 0;
-      this.colorItems = [];
-      this.colorCursor = 0;
-      this.tentativeConfig = null;
-      this.previewModeOverride = null;
-      this.tentativeElement = null;
-      this.invalidatePreview();
-      if (this.depth === 0) {
-        this.activeSubMenu = null;
-      }
-      this.tui.requestRender();
+    if (this.depth === 0) return;
+    if (this.depth === 1) {
+      this.closeSubMenu();
+      return;
     }
+    // Deeper levels (currently unused) — step back one level.
+    this.depth = (this.depth - 1) as NavDepth;
+    this.selectedIndex = 0;
+    this.tui.requestRender();
+  }
+
+  /**
+   * Index of the first non-section, non-disabled item in a list; 0 if none.
+   * Works for both ColorItem (has `disabled`) and LayoutItem (no `disabled`).
+   */
+  private static firstSelectableIndex<
+    T extends { type: string; disabled?: boolean },
+  >(items: T[]): number {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]!;
+      if (it.type !== "section" && !it.disabled) return i;
+    }
+    return 0;
+  }
+
+  /** Open the Customize Widget Colors submenu for a mode. */
+  private openColorsSubmenu(mode: DisplayMode): void {
+    this.depth = 1;
+    this.activeSubMenu = "colorsFlat";
+    this.previewModeOverride = null;
+    this.selectedIndex = 0;
+    this.colorItems = this.buildColorItems(mode);
+    this.colorCursor = SettingsMenu.firstSelectableIndex(this.colorItems);
+    this.invalidatePreview();
+    this.tui.requestRender();
+  }
+
+  /** Open the Customize Layout submenu for a mode. */
+  private openColumnsSubmenu(mode: DisplayMode): void {
+    this.depth = 1;
+    this.activeSubMenu = "columns";
+    this.reorderMode = false;
+    this.selectedIndex = 0;
+    this.layoutItems = this.buildCustomizeLayoutItems(mode);
+    this.layoutCursor = SettingsMenu.firstSelectableIndex(this.layoutItems);
+    this.invalidatePreview();
+    this.tui.requestRender();
+  }
+
+  /** Exit the current submenu back to depth 0, clearing submenu state. */
+  private closeSubMenu(): void {
+    this.depth = 0;
+    this.activeSubMenu = null;
+    this.selectedIndex = 0;
+    this.reorderMode = false;
+    this.layoutItems = [];
+    this.layoutCursor = 0;
+    this.colorItems = [];
+    this.colorCursor = 0;
+    this.previewModeOverride = null;
+    this.tentativeConfig = null;
+    this.tentativeElement = null;
+    this.invalidatePreview();
+    this.tui.requestRender();
+  }
+
+  /**
+   * Switch to an adjacent tab.  At depth 0 this is a plain tab switch;
+   * inside a submenu the submenu is rebuilt for the new tab's mode, or
+   * exited when it doesn't exist there (Customize Layout has no Global-tab
+   * form; Display Mode / Active Modes are Global-only).
+   */
+  private switchTab(direction: 1 | -1): void {
+    const newTab = ((this.activeTab + direction + TAB_NAMES.length) %
+      TAB_NAMES.length) as TabIndex;
+
+    if (this.depth === 0) {
+      this.activeTab = newTab;
+      this.globalNavIndex = 0;
+      this.selectedIndex = 0;
+      this.invalidatePreview();
+      this.tui.requestRender();
+      return;
+    }
+
+    // Depth 1: rebuild the submenu for the new tab, or exit it.
+    this.activeTab = newTab;
+    this.globalNavIndex = 0;
+
+    if (this.activeSubMenu === "colorsFlat") {
+      this.openColorsSubmenu(
+        this.getCurrentModeTab() ?? this.config.defaultMode,
+      );
+      return;
+    }
+    if (this.activeSubMenu === "columns") {
+      const mode = this.getCurrentModeTab();
+      if (newTab === 0 || !mode) {
+        this.closeSubMenu();
+        return;
+      }
+      this.openColumnsSubmenu(mode);
+      return;
+    }
+
+    // displayModePicker / activeModes have no equivalent on mode tabs.
+    this.closeSubMenu();
   }
 
   /** Get items for the current navigator level. */
@@ -1635,12 +1645,8 @@ export class SettingsMenu implements Component {
       return;
     }
 
-    // Toggle with Enter, Left, or Right
-    if (
-      matchesKey(input, Key.enter) ||
-      matchesKey(input, Key.right) ||
-      matchesKey(input, Key.left)
-    ) {
+    // Toggle with Enter (left/right are intercepted by tab-switching)
+    if (matchesKey(input, Key.enter)) {
       const mode = modes[this.selectedIndex];
       if (mode) {
         this.toggleActiveMode(mode);
@@ -1661,18 +1667,13 @@ export class SettingsMenu implements Component {
    */
   private openColorPicker(
     element: ColorElement,
-    mode: DisplayMode | null,
+    mode: DisplayMode,
   ): void {
     this.editingElement = element;
     this.editingMode = mode;
 
     // Get current color value
-    let currentColor: string | null;
-    if (mode) {
-      currentColor = this.config.perModeColorOverrides[mode][element] ?? null;
-    } else {
-      currentColor = this.config.globalColorOverrides[element] ?? null;
-    }
+    const currentColor = this.config.perModeColorOverrides[mode][element] ?? null;
 
     this.colorPicker = new ColorPicker(
       this.theme,
@@ -1703,12 +1704,7 @@ export class SettingsMenu implements Component {
         this.tentativeElement = element;
         // Clone config and apply hovered override
         this.tentativeConfig = JSON.parse(JSON.stringify(this.config));
-        if (mode) {
-          this.tentativeConfig.perModeColorOverrides[mode][element] =
-            hoveredColor;
-        } else {
-          this.tentativeConfig.globalColorOverrides[element] = hoveredColor;
-        }
+        this.tentativeConfig.perModeColorOverrides[mode][element] = hoveredColor;
         this.tui.requestRender();
       },
     );
@@ -1716,11 +1712,7 @@ export class SettingsMenu implements Component {
     // Fire initial hover with current selection (null = show default colors)
     this.tentativeElement = element;
     this.tentativeConfig = JSON.parse(JSON.stringify(this.config));
-    if (mode) {
-      this.tentativeConfig.perModeColorOverrides[mode][element] = currentColor;
-    } else {
-      this.tentativeConfig.globalColorOverrides[element] = currentColor;
-    }
+    this.tentativeConfig.perModeColorOverrides[mode][element] = currentColor;
 
     this.tui.requestRender();
   }
@@ -1728,14 +1720,10 @@ export class SettingsMenu implements Component {
   /** Apply a color change to the config and save. */
   private applyColorChange(
     element: ColorElement,
-    mode: DisplayMode | null,
+    mode: DisplayMode,
     color: string | null,
   ): void {
-    if (mode) {
-      this.config.perModeColorOverrides[mode][element] = color;
-    } else {
-      this.config.globalColorOverrides[element] = color;
-    }
+    this.config.perModeColorOverrides[mode][element] = color;
     saveConfig(this.config);
     this.invalidatePreview();
   }
@@ -1747,11 +1735,11 @@ export class SettingsMenu implements Component {
   /** Get a color swatch for the resolved color of an element. */
   private getResolvedColorSwatch(
     element: ColorElement,
-    mode: DisplayMode | null,
+    mode: DisplayMode,
   ): string {
     try {
       const ansi = resolveColor(element, this.config, {
-        mode: mode ?? undefined,
+        mode,
         getFgAnsi: (role: string) => this.theme.getFgAnsi(role),
       });
       // Truecolor: \x1b[38;2;R;G;Bm → convert back to hex for swatch
@@ -1937,8 +1925,7 @@ export class SettingsMenu implements Component {
       ? ac("accent", "Customize Widget Colors")
       : ac("text", "Customize Widget Colors");
     const a2 = ac("dim", " ▶");
-    const reset2 = sel2 ? ac("dim", "  d=reset") : "";
-    lines.push(c2 + l2 + a2 + reset2);
+    lines.push(c2 + l2 + a2);
 
     // ---- Item 3: Active Modes ----
     const enabledList = (
@@ -2114,7 +2101,7 @@ export class SettingsMenu implements Component {
   private renderHintBar(width: number): string[] {
     let hints: string;
     if (this.depth === 1) {
-      hints = "↑↓ select • Enter open • Esc back";
+      hints = "← → tabs • ↑↓ select • Enter open • Esc back";
     } else {
       hints = "← → tabs • ↑↓ select • ← → cycle • Enter open • Esc/q close";
     }
@@ -2469,40 +2456,19 @@ export class SettingsMenu implements Component {
       return;
     }
 
-    // Tab switching via left/right arrows
-    if (matchesKey(input, Key.right)) {
-      if (this.depth > 0) return; // Block tab switching in submenus
-      this.activeTab = ((this.activeTab + 1) % TAB_NAMES.length) as TabIndex;
-      this.globalNavIndex = 0;
-      this.selectedIndex = 0;
-      this.depth = 0;
-      this.reorderMode = false;
-      this.layoutItems = [];
-      this.layoutCursor = 0;
-      this.activeSubMenu = null;
-      this.invalidatePreview();
-      this.tui.requestRender();
-      return;
-    }
-    if (matchesKey(input, Key.left)) {
-      if (this.depth > 0) return; // Block tab switching in submenus
-      this.activeTab = ((this.activeTab - 1 + TAB_NAMES.length) %
-        TAB_NAMES.length) as TabIndex;
-      this.globalNavIndex = 0;
-      this.selectedIndex = 0;
-      this.depth = 0;
-      this.reorderMode = false;
-      this.layoutItems = [];
-      this.layoutCursor = 0;
-      this.activeSubMenu = null;
-      this.invalidatePreview();
-      this.tui.requestRender();
+    // Handle Customize Layout submenu input (before tab switching so left/right toggles items)
+    if (this.depth === 1 && this.activeSubMenu === "columns") {
+      this.handleLayoutInput(input);
       return;
     }
 
-    // Handle Customize Layout submenu input
-    if (this.depth === 1 && this.activeSubMenu === "columns") {
-      this.handleLayoutInput(input);
+    // Tab switching via left/right arrows (allowed in submenus too)
+    if (matchesKey(input, Key.right)) {
+      this.switchTab(1);
+      return;
+    }
+    if (matchesKey(input, Key.left)) {
+      this.switchTab(-1);
       return;
     }
 
@@ -2619,13 +2585,7 @@ export class SettingsMenu implements Component {
         this.layoutItems = this.buildCustomizeLayoutItems(mode);
         this.invalidatePreview();
         // Reset cursor to first non-section item
-        this.layoutCursor = 0;
-        for (let i = 0; i < this.layoutItems.length; i++) {
-          if (this.layoutItems[i]!.type !== "section") {
-            this.layoutCursor = i;
-            break;
-          }
-        }
+        this.layoutCursor = SettingsMenu.firstSelectableIndex(this.layoutItems);
         this.tui.requestRender();
       }
       return;
@@ -2671,7 +2631,7 @@ export class SettingsMenu implements Component {
       return;
     }
     if (this.depth === 1 && this.activeSubMenu === "colorsFlat") {
-      this.handleColorItemsInput(input, null);
+      this.handleColorItemsInput(input, this.config.defaultMode);
       return;
     }
 
@@ -2692,29 +2652,6 @@ export class SettingsMenu implements Component {
       return;
     }
 
-    // Left/right cycle values on Time Scope (item 1)
-    if (matchesKey(input, Key.right)) {
-      if (this.globalNavIndex === 1) this.cycleGlobalItem(1);
-      return;
-    }
-    if (matchesKey(input, Key.left)) {
-      if (this.globalNavIndex === 1) this.cycleGlobalItem(-1);
-      return;
-    }
-
-    // d — reset selected navigator item
-    if (input === "d") {
-      if (this.globalNavIndex === 2) {
-        // Reset all global color overrides
-        this.config.globalColorOverrides =
-          getDefaultConfig().globalColorOverrides;
-        saveConfig(this.config);
-        this.invalidatePreview();
-        this.tui.requestRender();
-      }
-      return;
-    }
-
     // Enter on item
     if (matchesKey(input, Key.enter)) {
       if (this.globalNavIndex === 0) {
@@ -2729,21 +2666,8 @@ export class SettingsMenu implements Component {
         // Time Scope — cycle forward
         this.cycleGlobalItem(1);
       } else if (this.globalNavIndex === 2) {
-        // Customize Widget Colors — open flat section-based list
-        this.depth = 1;
-        this.selectedIndex = 0;
-        this.activeSubMenu = "colorsFlat";
-        this.previewModeOverride = null;
-        this.colorItems = this.buildColorItems(null);
-        this.colorCursor = 0;
-        // Start cursor on first non-section item
-        for (let i = 0; i < this.colorItems.length; i++) {
-          if (this.colorItems[i]!.type !== "section") {
-            this.colorCursor = i;
-            break;
-          }
-        }
-        this.tui.requestRender();
+        // Customize Widget Colors (Global tab edits the default mode)
+        this.openColorsSubmenu(this.config.defaultMode);
       } else {
         // Active Modes
         this.depth = 1;
@@ -2863,37 +2787,12 @@ export class SettingsMenu implements Component {
       }
       case 1: {
         // Customize Layout
-        this.depth = 1;
-        this.activeSubMenu = "columns";
-        this.reorderMode = false;
-        this.layoutItems = this.buildCustomizeLayoutItems(mode);
-        this.layoutCursor = 0;
-        // Start cursor on first non-section item
-        for (let i = 0; i < this.layoutItems.length; i++) {
-          if (this.layoutItems[i]!.type !== "section") {
-            this.layoutCursor = i;
-            break;
-          }
-        }
-        this.tui.requestRender();
+        this.openColumnsSubmenu(mode);
         break;
       }
       case 2: {
-        // Customize Widget Colors — open flat section-based list
-        this.depth = 1;
-        this.selectedIndex = 0;
-        this.activeSubMenu = "colorsFlat";
-        this.previewModeOverride = null;
-        this.colorItems = this.buildColorItems(mode);
-        this.colorCursor = 0;
-        // Start cursor on first non-section item
-        for (let i = 0; i < this.colorItems.length; i++) {
-          if (this.colorItems[i]!.type !== "section") {
-            this.colorCursor = i;
-            break;
-          }
-        }
-        this.tui.requestRender();
+        // Customize Widget Colors
+        this.openColorsSubmenu(mode);
         break;
       }
     }

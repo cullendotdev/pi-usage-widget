@@ -91,14 +91,6 @@ describe("getDefaultConfig", () => {
     assert.equal(defaultConfig.footerLine.color, null);
   });
 
-  it("globalColorOverrides has all null entries (inherit from preset)", () => {
-    const overrides = defaultConfig.globalColorOverrides;
-    assert.equal(overrides.title, null);
-    assert.equal(overrides.scope, null);
-    assert.equal(overrides.providerHeader, null);
-    assert.equal(overrides.modelHeader, null);
-  });
-
   it("per-mode color overrides have all null entries for each mode", () => {
     for (const mode of [
       "summary",
@@ -110,6 +102,9 @@ describe("getDefaultConfig", () => {
       const overrides = defaultConfig.perModeColorOverrides[mode];
       assert.ok(overrides !== undefined, `Mode '${mode}' overrides missing`);
       assert.equal(overrides.title, null);
+      assert.equal(overrides.scope, null);
+      assert.equal(overrides.providerHeader, null);
+      assert.equal(overrides.modelHeader, null);
     }
   });
 });
@@ -157,14 +152,6 @@ describe("mergeConfig", () => {
     assert.equal(result.modes.compact.cost, true);
     // Other modes unaffected
     assert.equal(result.modes.summary.showTotals, false);
-  });
-
-  it("deep merges color overrides", () => {
-    const result = mergeConfig(defaultConfig, {
-      globalColorOverrides: { title: "#ff0000" },
-    });
-    assert.equal(result.globalColorOverrides.title, "#ff0000");
-    assert.equal(result.globalColorOverrides.scope, null); // kept default null
   });
 
   it("deep merges per-mode color overrides", () => {

@@ -463,7 +463,7 @@ describe("Settings menu integration — config reload after close", () => {
     config.defaultScope = "allTime";
     config.themedPreset = "dracula";
     config.placement.mode = "header";
-    config.globalColorOverrides.title = "#ff0000";
+    config.perModeColorOverrides.expanded.title = "#ff0000";
     config.modes["compact"]!.cost = false;
     saveConfig(config);
 
@@ -472,7 +472,7 @@ describe("Settings menu integration — config reload after close", () => {
     assert.strictEqual(reloaded.defaultScope, "allTime");
     assert.strictEqual(reloaded.themedPreset, "dracula");
     assert.strictEqual(reloaded.placement.mode, "header");
-    assert.strictEqual(reloaded.globalColorOverrides.title, "#ff0000");
+    assert.strictEqual(reloaded.perModeColorOverrides.expanded.title, "#ff0000");
     assert.strictEqual(reloaded.modes["compact"]!.cost, false);
   });
 });

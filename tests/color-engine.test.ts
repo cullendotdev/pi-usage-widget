@@ -303,80 +303,6 @@ describe("resolveColor — preset-only", () => {
 });
 
 // =============================================================================
-// resolveColor — global overrides
-// =============================================================================
-
-describe("resolveColor — global overrides", () => {
-  it("global hex override applies to all modes", () => {
-    const config = makeConfig({
-      globalColorOverrides: { title: "#ff0000" },
-    });
-    const ansiSummary = resolveColor("title", config, { mode: "summary" });
-    const ansiCompact = resolveColor("title", config, { mode: "compact" });
-    assert.equal(ansiToHex(ansiSummary), "#ff0000");
-    assert.equal(ansiToHex(ansiCompact), "#ff0000");
-  });
-
-  it("global hex override for a single element does not affect others", () => {
-    const config = makeConfig({
-      globalColorOverrides: { title: "#ff0000" },
-    });
-    const titleAnsi = resolveColor("title", config);
-    const scopeAnsi = resolveColor("scope", config);
-    assert.equal(ansiToHex(titleAnsi), "#ff0000");
-    assert.equal(ansiToHex(scopeAnsi), colorPresets.default.scope);
-  });
-
-  it("global ANSI palette name override", () => {
-    const config = makeConfig({
-      globalColorOverrides: { modelHeader: "brightMagenta" },
-    });
-    const ansi = resolveColor("modelHeader", config);
-    // Should be 4-bit ANSI, not truecolor
-    assert.equal(ansi, "\x1b[95m");
-  });
-
-  it("global theme fg role override resolves via fgMap", () => {
-    const config = makeConfig({
-      globalColorOverrides: { providerValue: "success" },
-    });
-    const ansi = resolveColor("providerValue", config);
-    expectAnsiEscape(ansi);
-    assert.equal(ansiToHex(ansi), defaultThemeFgMap.success);
-  });
-
-  it("global override with custom fgMap", () => {
-    const config = makeConfig({
-      globalColorOverrides: { msgsValue: "customRole" },
-    });
-    const ansi = resolveColor("msgsValue", config, {
-      themeFgMap: { customRole: "#abcdef" },
-    });
-    assert.equal(ansiToHex(ansi), "#abcdef");
-  });
-
-  it("null global override falls through to preset", () => {
-    const config = makeConfig({
-      globalColorOverrides: { title: null, scope: "#ff0000" },
-    });
-    const titleAnsi = resolveColor("title", config);
-    const scopeAnsi = resolveColor("scope", config);
-    // title: null → inherit preset
-    assert.equal(ansiToHex(titleAnsi), colorPresets.default.title);
-    // scope: #ff0000 → override
-    assert.equal(ansiToHex(scopeAnsi), "#ff0000");
-  });
-
-  it("invalid global override falls back to preset", () => {
-    const config = makeConfig({
-      globalColorOverrides: { title: "not_a_color_or_role" },
-    });
-    const ansi = resolveColor("title", config);
-    assert.equal(ansiToHex(ansi), colorPresets.default.title);
-  });
-});
-
-// =============================================================================
 // resolveColor — per-mode overrides
 // =============================================================================
 
@@ -397,31 +323,8 @@ describe("resolveColor — per-mode overrides", () => {
     assert.equal(ansiToHex(ansiCompact), colorPresets.default.title);
   });
 
-  it("per-mode override takes precedence over global override", () => {
-    const config = makeConfig({
-      globalColorOverrides: { title: "#00ff00" },
-      perModeColorOverrides: {
-        ...makeConfig().perModeColorOverrides,
-        summary: {
-          ...makeConfig().perModeColorOverrides.summary,
-          title: "#ff0000",
-        },
-      },
-    });
-    const ansi = resolveColor("title", config, { mode: "summary" });
-    assert.equal(ansiToHex(ansi), "#ff0000"); // per-mode wins, not global
-  });
-
-  it("null per-mode override falls through to global override", () => {
-    const config = makeConfig({
-      globalColorOverrides: { title: "#00ff00" },
-    });
+  it("null per-mode override falls through to preset", () => {
     // perModeColorOverrides.title is null for compact mode (default)
-    const ansi = resolveColor("title", config, { mode: "compact" });
-    assert.equal(ansiToHex(ansi), "#00ff00"); // falls through to global
-  });
-
-  it("null per-mode + null global = preset", () => {
     const config = makeConfig();
     const ansi = resolveColor("title", config, { mode: "compact" });
     assert.equal(ansiToHex(ansi), colorPresets.default.title);
@@ -471,9 +374,13 @@ describe("resolveColor — mode option", () => {
 describe("resolveColor — custom themeFgMap", () => {
   it("custom fgMap maps role name to correct hex", () => {
     const config = makeConfig({
-      globalColorOverrides: { scope: "accent" },
+      perModeColorOverrides: {
+        ...makeConfig().perModeColorOverrides,
+        summary: { ...makeConfig().perModeColorOverrides.summary, scope: "accent" },
+      },
     });
     const ansi = resolveColor("scope", config, {
+      mode: "summary",
       themeFgMap: { accent: "#112233" },
     });
     assert.equal(ansiToHex(ansi), "#112233");
@@ -481,12 +388,16 @@ describe("resolveColor — custom themeFgMap", () => {
 
   it("custom fgMap overrides default role mappings", () => {
     const config = makeConfig({
-      globalColorOverrides: { scope: "accent" },
+      perModeColorOverrides: {
+        ...makeConfig().perModeColorOverrides,
+        summary: { ...makeConfig().perModeColorOverrides.summary, scope: "accent" },
+      },
     });
     const ansiCustom = resolveColor("scope", config, {
+      mode: "summary",
       themeFgMap: { accent: "#112233" },
     });
-    const ansiDefault = resolveColor("scope", config);
+    const ansiDefault = resolveColor("scope", config, { mode: "summary" });
     assert.notEqual(ansiToHex(ansiCustom), ansiToHex(ansiDefault));
   });
 });
@@ -496,7 +407,7 @@ describe("resolveColor — custom themeFgMap", () => {
 // =============================================================================
 
 describe("resolveColor — combined scenarios", () => {
-  it("per-mode > global > default preset precedence chain", () => {
+  it("per-mode > default preset precedence chain", () => {
     const perModeOverrides = { ...makeConfig().perModeColorOverrides };
     perModeOverrides.compact = {
       ...perModeOverrides.compact,
@@ -504,7 +415,6 @@ describe("resolveColor — combined scenarios", () => {
     };
 
     const config = makeConfig({
-      globalColorOverrides: { costHeader: "#222222" },
       perModeColorOverrides: perModeOverrides,
     });
 
@@ -512,18 +422,17 @@ describe("resolveColor — combined scenarios", () => {
     const ansiCompact = resolveColor("costHeader", config, { mode: "compact" });
     assert.equal(ansiToHex(ansiCompact), "#111111");
 
-    // Mode where per-mode is null: global wins
+    // Mode where per-mode is null: falls through to default preset + theme role
     const ansiSummary = resolveColor("costHeader", config, { mode: "summary" });
-    assert.equal(ansiToHex(ansiSummary), "#222222");
+    assert.equal(ansiToHex(ansiSummary), colorPresets.default.costHeader);
 
-    // Mode where both are null: falls through to default preset + theme role
+    // Explicit null per-mode = preset
     const perModeOverrides2 = { ...makeConfig().perModeColorOverrides };
     perModeOverrides2.compact = {
       ...perModeOverrides2.compact,
       costHeader: null,
     };
     const config2 = makeConfig({
-      globalColorOverrides: { costHeader: null },
       perModeColorOverrides: perModeOverrides2,
     });
     const ansiPreset = resolveColor("costHeader", config2, { mode: "compact" });

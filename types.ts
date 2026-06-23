@@ -233,9 +233,7 @@ export interface UsageWidgetConfig {
   themedPreset: ThemedPreset;
   /** Per-mode color scheme override (null = inherit from global) */
   perModeThemedPreset: Record<DisplayMode, ThemedPreset | null>;
-  /** Global color overrides (applied to all modes) */
-  globalColorOverrides: ColorOverrides;
-  /** Per-mode color overrides (null entries inherit from global) */
+  /** Per-mode color overrides (null entries inherit from the global default) */
   perModeColorOverrides: Record<DisplayMode, ColorOverrides>;
   /** Widget placement */
   placement: PlacementConfig;

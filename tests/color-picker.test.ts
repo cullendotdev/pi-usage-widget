@@ -305,41 +305,42 @@ describe("ColorPicker class structure", () => {
 // =============================================================================
 
 describe("Color resolution with overrides", () => {
-  it("global override takes precedence over preset default", () => {
-    const { getDefaultConfig, mergeConfig } = require("../config-persistence.js");
+  it("per-mode override takes precedence over preset default", () => {
+    const { getDefaultConfig } = require("../config-persistence.js");
     const { resolveColor, colorPresets } = require("../color-engine.js");
 
     const config = getDefaultConfig();
-    // Override title color globally
-    config.globalColorOverrides.title = "#ff0000";
-    const result = resolveColor("title", config);
+    // Override title color for the summary mode
+    config.perModeColorOverrides.summary.title = "#ff0000";
+    const result = resolveColor("title", { ...config }, { mode: "summary" });
 
     // Should use the override, not the preset
     assert.ok(result.includes("255;0;0") || result !== colorPresets.default.title,
-      "global override should take precedence over preset");
+      "per-mode override should take precedence over preset");
   });
 
-  it("per-mode override takes precedence over global", () => {
+  it("per-mode override only applies to its own mode", () => {
     const { getDefaultConfig } = require("../config-persistence.js");
     const { resolveColor } = require("../color-engine.js");
 
     const config = getDefaultConfig();
-    config.globalColorOverrides.title = "#00ff00"; // global: green
     config.perModeColorOverrides.summary.title = "#ff0000"; // summary: red
+    config.perModeColorOverrides.compact.title = "#00ff00"; // compact: green
 
-    const result = resolveColor("title", { ...config }, { mode: "summary" });
+    const resultSummary = resolveColor("title", { ...config }, { mode: "summary" });
+    const resultCompact = resolveColor("title", { ...config }, { mode: "compact" });
 
-    // Per-mode override (red) should win
-    assert.ok(result.includes("255;0;0"),
-      "per-mode override should take precedence over global");
+    assert.ok(resultSummary.includes("255;0;0"),
+      "summary override should apply to summary mode");
+    assert.ok(resultCompact.includes("0;255;0"),
+      "compact override should apply to compact mode");
   });
 
-  it("null override means inherit from parent level", () => {
+  it("null override means inherit from preset", () => {
     const { getDefaultConfig } = require("../config-persistence.js");
     const { resolveColor, colorPresets } = require("../color-engine.js");
 
     const config = getDefaultConfig();
-    config.globalColorOverrides.title = null; // inherit
     config.perModeColorOverrides.summary.title = null; // inherit
 
     // Should fall through to preset default
@@ -428,39 +429,48 @@ describe("Color override config persistence", () => {
     try { await unlink(configPath); } catch { /* */ }
   });
 
-  it("global color overrides start as null (all inherit)", () => {
+  it("per-mode color overrides start as null (all inherit)", () => {
     const { getDefaultConfig } = require("../config-persistence.js");
     const defaults = getDefaultConfig();
 
-    const overrides = defaults.globalColorOverrides;
-    const keys = Object.keys(overrides) as Array<keyof typeof overrides>;
-
-    for (const key of keys) {
-      assert.equal(overrides[key], null, `globalColorOverrides.${key} should default to null`);
+    for (const mode of ["summary", "compact", "Per Model", "expanded", "hidden"] as const) {
+      const overrides = defaults.perModeColorOverrides[mode];
+      const keys = Object.keys(overrides) as Array<keyof typeof overrides>;
+      for (const key of keys) {
+        assert.equal(overrides[key], null, `perModeColorOverrides.${mode}.${key} should default to null`);
+      }
     }
   });
 
-  it("setting a global color override persists to disk", () => {
-    const { getDefaultConfig, mergeConfig, saveConfig, loadConfig } = require("../config-persistence.js");
+  it("legacy globalColorOverrides fold into the default mode's per-mode overrides on load", async () => {
+    const { writeFile } = require("node:fs/promises");
+    const { loadConfig } = require("../config-persistence.js");
 
-    const modified = mergeConfig(getDefaultConfig(), {
-      globalColorOverrides: {
-        title: "#ff0000",
-        scope: null,
+    // A pre-retirement config that used global overrides and left per-mode null.
+    const legacy = {
+      defaultMode: "summary",
+      globalColorOverrides: { title: "#ff0000", scope: "#00ff00" },
+      perModeColorOverrides: {
+        summary: { title: null, scope: null },
+        compact: { title: null, scope: null },
+        "Per Model": { title: null, scope: null },
+        expanded: { title: null, scope: null },
+        hidden: { title: null, scope: null },
       },
-    } as any);
-
-    assert.equal(modified.globalColorOverrides.title, "#ff0000");
-    assert.equal(modified.globalColorOverrides.scope, null);
-
-    saveConfig(modified);
+    };
+    await writeFile(configPath, JSON.stringify(legacy));
 
     delete require.cache[require.resolve("../config-persistence.js")];
     const { loadConfig: load2 } = require("../config-persistence.js");
     const loaded = load2();
 
-    assert.equal(loaded.globalColorOverrides.title, "#ff0000");
-    assert.equal(loaded.globalColorOverrides.scope, null);
+    // Globals folded into the default mode (summary), since per-mode was null.
+    assert.equal(loaded.perModeColorOverrides.summary.title, "#ff0000");
+    assert.equal(loaded.perModeColorOverrides.summary.scope, "#00ff00");
+    // Other modes unaffected.
+    assert.equal(loaded.perModeColorOverrides.compact.title, null);
+    // The retired field is gone.
+    assert.equal((loaded as any).globalColorOverrides, undefined);
   });
 
   it("per-mode color overrides persist independently per mode", () => {
@@ -493,32 +503,38 @@ describe("Color override config persistence", () => {
     const { getDefaultConfig, mergeConfig, saveConfig, loadConfig } = require("../config-persistence.js");
 
     const modified = mergeConfig(getDefaultConfig(), {
-      globalColorOverrides: { title: "accent" },
+      perModeColorOverrides: {
+        ...getDefaultConfig().perModeColorOverrides,
+        summary: { ...getDefaultConfig().perModeColorOverrides.summary, title: "accent" },
+      },
     } as any);
 
-    assert.equal(modified.globalColorOverrides.title, "accent");
+    assert.equal(modified.perModeColorOverrides.summary.title, "accent");
     saveConfig(modified);
 
     delete require.cache[require.resolve("../config-persistence.js")];
     const { loadConfig: load2 } = require("../config-persistence.js");
     const loaded = load2();
-    assert.equal(loaded.globalColorOverrides.title, "accent");
+    assert.equal(loaded.perModeColorOverrides.summary.title, "accent");
   });
 
   it("color overrides can use ANSI palette names", () => {
     const { getDefaultConfig, mergeConfig, saveConfig, loadConfig } = require("../config-persistence.js");
 
     const modified = mergeConfig(getDefaultConfig(), {
-      globalColorOverrides: { title: "brightCyan" },
+      perModeColorOverrides: {
+        ...getDefaultConfig().perModeColorOverrides,
+        summary: { ...getDefaultConfig().perModeColorOverrides.summary, title: "brightCyan" },
+      },
     } as any);
 
-    assert.equal(modified.globalColorOverrides.title, "brightCyan");
+    assert.equal(modified.perModeColorOverrides.summary.title, "brightCyan");
     saveConfig(modified);
 
     delete require.cache[require.resolve("../config-persistence.js")];
     const { loadConfig: load2 } = require("../config-persistence.js");
     const loaded = load2();
-    assert.equal(loaded.globalColorOverrides.title, "brightCyan");
+    assert.equal(loaded.perModeColorOverrides.summary.title, "brightCyan");
   });
 });
 
