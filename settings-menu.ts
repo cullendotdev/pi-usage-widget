@@ -220,6 +220,7 @@ type SubMenuType =
   | "columns"
   | "colorsFlat"
   | "displayModePicker"
+  | "timeScopePicker"
   | "activeModes";
 
 // =============================================================================
@@ -1473,7 +1474,7 @@ export class SettingsMenu implements Component {
       return;
     }
 
-    // displayModePicker / activeModes have no equivalent on mode tabs.
+    // displayModePicker / timeScopePicker / activeModes have no equivalent on mode tabs.
     this.closeSubMenu();
   }
 
@@ -1562,6 +1563,68 @@ export class SettingsMenu implements Component {
       return;
     }
   }
+
+  // ── Time Scope picker ──────────────────────────────────────────────
+
+  /** Render the time scope picker list. */
+  private renderTimeScopePicker(width: number): string[] {
+    const lines: string[] = [];
+    const scopes = TIME_SCOPES;
+
+    lines.push("  " + this.theme.fg("dim", "Select Time Scope: "));
+
+    for (let i = 0; i < scopes.length; i++) {
+      const scope = scopes[i]!;
+      const label = TIME_SCOPE_LABELS[scope] ?? scope;
+      const isSelected = i === this.selectedIndex;
+      const isCurrent = scope === this.config.defaultScope;
+      const cursor = isSelected ? this.theme.fg("accent", "▸ ") : "  ";
+      const check = isCurrent ? this.theme.fg("success", " ✓") : "";
+      const text = isSelected
+        ? this.theme.fg("accent", label)
+        : this.theme.fg("text", label);
+      lines.push("  " + cursor + text + check);
+    }
+
+    lines.push(this.theme.fg("dim", "─".repeat(Math.max(0, width))));
+
+    let hotkeysText = "↑↓ select • enter confirm • esc cancel";
+    lines.push(this.theme.fg("dim", this.centerText(width, hotkeysText)));
+
+    return lines;
+  }
+
+  /** Handle input in the time scope picker. */
+  private handleTimeScopePickerInput(input: string): void {
+    const scopes = TIME_SCOPES;
+    if (matchesKey(input, Key.up)) {
+      if (this.selectedIndex > 0) {
+        this.selectedIndex--;
+        this.invalidatePreview();
+        this.tui.requestRender();
+      }
+      return;
+    }
+    if (matchesKey(input, Key.down)) {
+      if (this.selectedIndex < scopes.length - 1) {
+        this.selectedIndex++;
+        this.invalidatePreview();
+        this.tui.requestRender();
+      }
+      return;
+    }
+    if (matchesKey(input, Key.enter)) {
+      const scope = scopes[this.selectedIndex];
+      if (scope && scope !== this.config.defaultScope) {
+        this.config.defaultScope = scope;
+        saveConfig(this.config);
+        this.invalidatePreview();
+      }
+      this.navigateBack();
+      return;
+    }
+  }
+
 
   // ===========================================================================
   // Active modes picker
@@ -1916,7 +1979,8 @@ export class SettingsMenu implements Component {
     const c1 = sel1 ? ac("accent", "▸ ") : "  ";
     const l1 = sel1 ? ac("accent", "Time Scope: ") : ac("text", "Time Scope: ");
     const v1 = sel1 ? ac("accent", scopeLabel) : ac("text", scopeLabel);
-    lines.push(c1 + l1 + v1);
+    const a1 = ac("dim", " ▶");
+    lines.push(c1 + l1 + v1 + a1);
 
     // ---- Item 2: Customize Widget Colors ----
     const sel2 = idx === 2;
@@ -2319,6 +2383,39 @@ export class SettingsMenu implements Component {
       return lines;
     }
 
+    // If time scope picker is active
+    if (this.depth === 1 && this.activeSubMenu === "timeScopePicker") {
+      const lines: string[] = [];
+
+      // Top border
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      // Title
+      const title = " Time Scope ";
+      const titlePad = Math.floor((safeWidth - title.length) / 2);
+      lines.push(
+        this.theme.fg(
+          "border",
+          "─".repeat(titlePad) +
+            title +
+            "─".repeat(safeWidth - titlePad - title.length),
+        ),
+      );
+
+      // Live preview
+      lines.push(...this.renderPreviewSection(safeWidth));
+
+      // Time scope picker list
+      const pickerLines = this.renderTimeScopePicker(safeWidth);
+      for (const line of pickerLines) {
+        lines.push(line);
+      }
+
+      lines.push(this.theme.fg("border", "─".repeat(safeWidth)));
+
+      return lines;
+    }
+
     // If active modes picker is active
     if (this.depth === 1 && this.activeSubMenu === "activeModes") {
       const lines: string[] = [];
@@ -2626,6 +2723,10 @@ export class SettingsMenu implements Component {
       this.handleDisplayModePickerInput(input);
       return;
     }
+    if (this.depth === 1 && this.activeSubMenu === "timeScopePicker") {
+      this.handleTimeScopePickerInput(input);
+      return;
+    }
     if (this.depth === 1 && this.activeSubMenu === "activeModes") {
       this.handleActiveModesInput(input);
       return;
@@ -2663,8 +2764,12 @@ export class SettingsMenu implements Component {
         this.invalidatePreview();
         this.tui.requestRender();
       } else if (this.globalNavIndex === 1) {
-        // Time Scope — cycle forward
-        this.cycleGlobalItem(1);
+        // Time Scope — open picker submenu
+        this.depth = 1;
+        this.selectedIndex = TIME_SCOPES.indexOf(this.config.defaultScope);
+        this.activeSubMenu = "timeScopePicker";
+        this.invalidatePreview();
+        this.tui.requestRender();
       } else if (this.globalNavIndex === 2) {
         // Customize Widget Colors (Global tab edits the default mode)
         this.openColorsSubmenu(this.config.defaultMode);
